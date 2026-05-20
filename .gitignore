@@ -1,0 +1,22 @@
+# Root
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+
+# Environment variables (ห้าม commit ขึ้น git เด็ดขาด)
+.env
+.env.local
+.env.production
+
+# Build output
+client/dist/
+client/.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/settings.json
