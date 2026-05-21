@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
@@ -10,6 +10,14 @@ export default function LoginPage() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(0); // วินาทีที่ต้องรอ
+
+  // นับถอยหลัง countdown
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [countdown]);
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -18,6 +26,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (countdown > 0) return;
     setLoading(true);
     try {
       const res = await axios.post(
@@ -27,6 +36,10 @@ export default function LoginPage() {
       login(res.data.user, res.data.token);
       navigate('/dashboard');
     } catch (err) {
+      if (err.response?.status === 429) {
+        const secs = err.response.data?.retryAfterSeconds || 900;
+        setCountdown(secs);
+      }
       setError(err.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
     } finally {
       setLoading(false);
@@ -34,66 +47,84 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-lg w-full max-w-md p-8">
+    <div className="min-h-screen bg-base-200 flex items-center justify-center p-4">
+      <div className="card bg-base-100 shadow-xl w-full max-w-md">
+        <div className="card-body gap-4">
 
-        {/* Logo / Title */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4">
-            <span className="text-white text-2xl font-bold">G</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-800">GradTrack</h1>
-          <p className="text-gray-500 text-sm mt-1">ระบบติดตามผลการเรียน</p>
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ชื่อผู้ใช้
-            </label>
-            <input
-              type="text"
-              name="username"
-              value={form.username}
-              onChange={handleChange}
-              placeholder="กรอกชื่อผู้ใช้"
-              required
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              รหัสผ่าน
-            </label>
-            <input
-              type="password"
-              name="password"
-              value={form.password}
-              onChange={handleChange}
-              placeholder="กรอกรหัสผ่าน"
-              required
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition"
-            />
-          </div>
-
-          {/* Error message */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg px-4 py-2.5">
-              {error}
+          {/* Logo / Title */}
+          <div className="text-center mb-2">
+            <div className="avatar placeholder mb-3">
+              <div className="bg-primary text-primary-content rounded-2xl w-16 text-2xl font-bold">
+                <span>G</span>
+              </div>
             </div>
-          )}
+          <h1 className="text-xl font-semibold">GradTrack ✨</h1>
+            <p className="text-base-content/50 text-xs mt-1">ระบบติดตามผลการเรียน 📚</p>
+          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-medium py-2.5 rounded-lg transition text-sm"
-          >
-            {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
-          </button>
-        </form>
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <label className="form-control w-full">
+              <div className="label">
+                <span className="label-text text-xs">👤 ชื่อผู้ใช้</span>
+              </div>
+              <input
+                type="text"
+                name="username"
+                value={form.username}
+                onChange={handleChange}
+                placeholder="กรอกชื่อผู้ใช้"
+                required
+                className="input input-bordered input-sm w-full"
+              />
+            </label>
 
+            <label className="form-control w-full">
+              <div className="label">
+                <span className="label-text text-xs">🔒 รหัสผ่าน</span>
+              </div>
+              <input
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="กรอกรหัสผ่าน"
+                required
+                className="input input-bordered input-sm w-full"
+              />
+            </label>
+
+            {/* Error message */}
+            {error && (
+              <div role="alert" className="alert alert-error">
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Countdown เมื่อโดน rate limit */}
+            {countdown > 0 && (
+              <div role="alert" className="alert alert-warning">
+                <span>
+                  ล็อคชั่วคราว รอ{' '}
+                  <span className="font-bold countdown">
+                    {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
+                  </span>{' '}
+                  นาที
+                </span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || countdown > 0}
+              className="btn btn-primary btn-sm w-full mt-2"
+            >
+              {loading && <span className="loading loading-spinner loading-xs"></span>}
+              {countdown > 0 ? `⏳ รอ ${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')} นาที` : loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ →'}
+            </button>
+          </form>
+
+        </div>
       </div>
     </div>
   );

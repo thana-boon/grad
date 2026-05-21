@@ -17,6 +17,7 @@ client/.vite/
 # Logs
 *.log
 npm-debug.log*
+logs/
 
 # Editor
 .vscode/settings.json

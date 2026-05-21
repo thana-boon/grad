@@ -1,9 +1,21 @@
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, NavLink } from 'react-router-dom';
 import AdminDashboard from '../components/dashboard/AdminDashboard';
 import StudentDashboard from '../components/dashboard/StudentDashboard';
+import AccountsPage from './admin/AccountsPage';
+import AcademicYearsPage from './admin/AcademicYearsPage';
+import StudentsPage from './admin/StudentsPage';
+import UniversitiesPage from './admin/UniversitiesPage';
 
-export default function DashboardPage() {
+const ADMIN_MENU = [
+  { label: 'dashboard', path: '/dashboard', icon: '🏠' },
+  { label: 'จัดการ account', path: '/admin/accounts', icon: '👥' },
+  { label: 'ปีการศึกษา', path: '/admin/academic-years', icon: '📅' },
+  { label: 'รายชื่อนักเรียน', path: '/admin/students', icon: '🎓' },
+  { label: 'มหาวิทยาลัย', path: '/admin/universities', icon: '🏛️' },
+];
+
+export default function DashboardPage({ activePage }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -12,38 +24,70 @@ export default function DashboardPage() {
     navigate('/login');
   };
 
+  const renderContent = () => {
+    if (user?.role !== 'admin') return <StudentDashboard />;
+    if (activePage === 'accounts') return <AccountsPage />;
+    if (activePage === 'academic-years') return <AcademicYearsPage />;
+    if (activePage === 'students') return <StudentsPage />;
+    if (activePage === 'universities') return <UniversitiesPage />;
+    return <AdminDashboard />;
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-base-200">
       {/* Navbar */}
-      <nav className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-16">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">G</span>
+      <div className="navbar bg-base-100 shadow-sm">
+        <div className="navbar-start">
+          <div className="flex items-center gap-2 px-2">
+            <div className="avatar placeholder">
+              <div className="bg-primary text-primary-content rounded-lg w-8 text-sm font-bold">
+                <span>G</span>
+              </div>
             </div>
-            <span className="font-semibold text-gray-800">GradTrack</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-600">
-              สวัสดี, <span className="font-medium">{user?.name || user?.username}</span>
-              <span className="ml-2 px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-700 font-medium">
-                {user?.role === 'admin' ? 'ผู้ดูแล' : 'นักเรียน'}
-              </span>
-            </span>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-gray-500 hover:text-red-600 transition"
-            >
-              ออกจากระบบ
-            </button>
+            <span className="font-medium text-sm">GradTrack</span>
           </div>
         </div>
-      </nav>
+        <div className="navbar-end gap-3 pr-4">
+          <span className="text-xs hidden sm:block text-base-content/60">
+            สวัสดี 👋 <span className="font-medium text-base-content">{user?.name || user?.username}</span>
+          </span>
+          <div className="badge badge-primary badge-sm">
+            {user?.role === 'admin' ? '🔧 admin' : '🎓 student'}
+          </div>
+          <button onClick={handleLogout} className="btn btn-ghost btn-sm text-error">
+            ออกจากระบบ
+          </button>
+        </div>
+      </div>
 
-      {/* Content — แสดงตาม role */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {user?.role === 'admin' ? <AdminDashboard /> : <StudentDashboard />}
-      </main>
+      <div className="flex">
+        {/* Sidebar (admin เท่านั้น) */}
+        {user?.role === 'admin' && (
+          <aside className="w-56 min-h-screen bg-base-100 shadow-sm hidden md:block">
+            <ul className="menu p-3 gap-1">
+              {ADMIN_MENU.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    end
+                    className={({ isActive }) =>
+                      isActive ? 'active font-medium' : ''
+                    }
+                  >
+                    <span>{item.icon}</span>
+                    {item.label}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
+
+        {/* Main content */}
+        <main className="flex-1 p-6">
+          {renderContent()}
+        </main>
+      </div>
     </div>
   );
 }

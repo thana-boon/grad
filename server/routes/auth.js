@@ -3,9 +3,11 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
+const logger = require('../config/logger');
+const { loginLimiter } = require('../middlewares/rateLimiter');
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -19,6 +21,7 @@ router.post('/login', async (req, res) => {
     );
 
     if (rows.length === 0) {
+      logger.warn('Login failed: user not found', { username, ip: req.ip });
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
@@ -26,6 +29,7 @@ router.post('/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
+      logger.warn('Login failed: wrong password', { username, ip: req.ip });
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
@@ -34,6 +38,8 @@ router.post('/login', async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
+
+    logger.info('Login success', { username, role: user.role, ip: req.ip });
 
     res.json({
       token,
@@ -45,7 +51,7 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error('Login error', { error: err.message });
     res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
 });
