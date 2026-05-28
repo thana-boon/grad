@@ -6,6 +6,10 @@ import AccountsPage from './admin/AccountsPage';
 import AcademicYearsPage from './admin/AcademicYearsPage';
 import StudentsPage from './admin/StudentsPage';
 import UniversitiesPage from './admin/UniversitiesPage';
+import FacultiesPage from './admin/FacultiesPage';
+import AdmissionStatusPage from './admin/AdmissionStatusPage';
+import ReportPage from './admin/ReportPage';
+import AdmissionTableReportPage from './admin/AdmissionTableReportPage';
 
 const ADMIN_MENU = [
   { label: 'dashboard', path: '/dashboard', icon: '🏠' },
@@ -13,6 +17,10 @@ const ADMIN_MENU = [
   { label: 'ปีการศึกษา', path: '/admin/academic-years', icon: '📅' },
   { label: 'รายชื่อนักเรียน', path: '/admin/students', icon: '🎓' },
   { label: 'มหาวิทยาลัย', path: '/admin/universities', icon: '🏛️' },
+  { label: 'คณะ/สาขา', path: '/admin/faculties', icon: '🏫' },
+  { label: 'สถานะผลสอบ', path: '/admin/admission-status', icon: '📋' },
+  { label: 'รายงาน/Export', path: '/admin/report', icon: '📊' },
+  { label: 'รายงานตาราง', path: '/admin/report-table', icon: '📋' },
 ];
 
 export default function DashboardPage({ activePage }) {
@@ -30,6 +38,10 @@ export default function DashboardPage({ activePage }) {
     if (activePage === 'academic-years') return <AcademicYearsPage />;
     if (activePage === 'students') return <StudentsPage />;
     if (activePage === 'universities') return <UniversitiesPage />;
+    if (activePage === 'faculties') return <FacultiesPage />;
+    if (activePage === 'admission-status') return <AdmissionStatusPage />;
+    if (activePage === 'report') return <ReportPage />;
+    if (activePage === 'report-table') return <AdmissionTableReportPage />;
     return <AdminDashboard />;
   };
 
@@ -84,7 +96,7 @@ export default function DashboardPage({ activePage }) {
         )}
 
         {/* Main content */}
-        <main className="flex-1 p-6">
+        <main className="flex-1 min-w-0 overflow-x-auto p-6">
           {renderContent()}
         </main>
       </div>

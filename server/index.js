@@ -29,6 +29,9 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/academic-years', require('./routes/academicYears'));
 app.use('/api/students', require('./routes/students'));
 app.use('/api/universities', require('./routes/universities'));
+app.use('/api/faculties', require('./routes/faculties'));
+app.use('/api/student', require('./routes/studentAuth'));
+app.use('/api/report-settings', require('./routes/reportSettings'));
 
 // Health check
 app.get('/api/health', (req, res) => {

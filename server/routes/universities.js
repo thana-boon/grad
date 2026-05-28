@@ -404,110 +404,27 @@ const UNI_DOMAINS = {
 
 // ─── Helper: ดาวน์โหลดรูป → Buffer ─────────────────────────────────────────
 const downloadImage = async (url, referer) => {
-  const headers = { 'User-Agent': 'GradTrack/1.0 (Educational)' };
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  };
   if (referer) headers['Referer'] = referer;
   const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000, headers });
   const ct = (res.headers['content-type'] || '').split(';')[0].trim();
-  if (!ct.startsWith('image/') && ct !== 'image/svg+xml') throw new Error(`Not image: ${ct}`);
+  if (!ct.startsWith('image/')) throw new Error(`Not image: ${ct}`);
   return { data: Buffer.from(res.data), ct };
 };
 
 const CT_TO_EXT = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
   'image/svg+xml': '.svg', 'image/webp': '.webp', 'image/x-icon': '.ico',
+  'image/vnd.microsoft.icon': '.ico',
 };
 const getExt = (ct, fallbackUrl = '') =>
   CT_TO_EXT[ct] || path.extname(fallbackUrl.split('?')[0]) || '.png';
 
-const WP_HEADERS = { 'User-Agent': 'GradTrack/1.0 (Educational)', Accept: 'application/json' };
-
-// ─── Source 1: Clearbit logo จาก domain ─────────────────────────────────────
-const fetchClearbitLogo = async (domain) => {
-  const url = `https://logo.clearbit.com/${domain}?size=256`;
-  return downloadImage(url);
-};
-
-// ─── Source 2: Wikipedia Thai — search แล้วค่อยดึง pageimages ───────────────
-const fetchWikipediaThaiLogo = async (name) => {
-  // step 1: หาชื่อ page จริงๆ ด้วย search
-  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const pageTitle = srData?.query?.search?.[0]?.title;
-  if (!pageTitle) return null;
-
-  // step 2: ดึง thumbnail
-  const { data: imgData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', titles: pageTitle, prop: 'pageimages', pithumbsize: 300, pilicense: 'any', format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const pages = imgData?.query?.pages;
-  const thumbUrl = pages && Object.values(pages)[0]?.thumbnail?.source;
-  if (!thumbUrl) return null;
-  const img = await downloadImage(thumbUrl);
-  return img;
-};
-
-// ─── Source 3: Wikipedia English (ผ่าน Wikidata cross-language) ─────────────
-const fetchWikipediaEnglishLogo = async (name) => {
-  // หา Wikidata item จากชื่อ Thai Wikipedia
-  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const thTitle = srData?.query?.search?.[0]?.title;
-  if (!thTitle) return null;
-
-  // หา English title จาก langlinks
-  const { data: llData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', titles: thTitle, prop: 'langlinks', lllang: 'en', lllimit: 1, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const llPages = llData?.query?.pages;
-  const enTitle = llPages && Object.values(llPages)[0]?.langlinks?.[0]?.['*'];
-  if (!enTitle) return null;
-
-  // ดึง pageimages จาก en.wikipedia
-  const { data: enImg } = await axios.get('https://en.wikipedia.org/w/api.php', {
-    params: { action: 'query', titles: enTitle, prop: 'pageimages', pithumbsize: 300, pilicense: 'any', format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const enPages = enImg?.query?.pages;
-  const thumbUrl = enPages && Object.values(enPages)[0]?.thumbnail?.source;
-  if (!thumbUrl) return null;
-  return downloadImage(thumbUrl);
-};
-
-// ─── Source 4: Wikimedia Commons — ค้นหา logo file ─────────────────────────
-const fetchCommonsLogo = async (name) => {
-  const queries = [`${name} logo`, `${name} seal`, name];
-  for (const q of queries) {
-    try {
-      const { data: srData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
-        params: { action: 'query', list: 'search', srsearch: q, srnamespace: 6, srlimit: 5, format: 'json' },
-        timeout: 10000, headers: WP_HEADERS,
-      });
-      const files = srData?.query?.search;
-      if (!files?.length) continue;
-
-      for (const file of files) {
-        try {
-          const { data: infoData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
-            params: { action: 'query', prop: 'imageinfo', titles: file.title, iiprop: 'url', iiurlwidth: 256, format: 'json' },
-            timeout: 10000, headers: WP_HEADERS,
-          });
-          const infoPages = infoData?.query?.pages;
-          const info = infoPages && Object.values(infoPages)[0]?.imageinfo?.[0];
-          const imgUrl = info?.thumburl || info?.url;
-          if (!imgUrl) continue;
-          const img = await downloadImage(imgUrl, 'https://commons.wikimedia.org');
-          return img;
-        } catch { /* ลอง file ถัดไป */ }
-      }
-    } catch { /* ลอง query ถัดไป */ }
-  }
-  return null;
+const WP_HEADERS = {
+  'User-Agent': 'GradTrack/1.0 (Educational)',
+  Accept: 'application/json',
 };
 
 // ─── Helper: บันทึกไฟล์ + อัปเดต DB ─────────────────────────────────────────
@@ -516,6 +433,147 @@ const saveLogoFile = async (uniId, imgBuffer, ct, source) => {
   const filename = `logo-${source}-${uniId}-${Date.now()}${ext}`;
   fs.writeFileSync(path.join(LOGO_DIR, filename), imgBuffer);
   await db.query('UPDATE `universities` SET logo_url = ? WHERE id = ?', [`/uploads/logos/${filename}`, uniId]);
+};
+
+// ─── Source 1: Scrape เว็บมหาวิทยาลัยโดยตรง ────────────────────────────────
+const fetchWebsiteLogo = async (domain) => {
+  for (const baseUrl of [`https://www.${domain}`, `https://${domain}`]) {
+    try {
+      const { data: html } = await axios.get(baseUrl, {
+        timeout: 12000,
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'th,en;q=0.9',
+        },
+      });
+      const $ = cheerio.load(html);
+      const candidates = []; // { url, priority }
+
+      // apple-touch-icon (มักเป็น logo จริง)
+      $('link[rel*="apple-touch-icon"]').each((_, el) => {
+        const href = $(el).attr('href');
+        if (href) candidates.push({ url: href, priority: 1 });
+      });
+
+      // og:image
+      const ogImg = $('meta[property="og:image"]').attr('content');
+      if (ogImg) candidates.push({ url: ogImg, priority: 2 });
+
+      // img ที่มี logo ใน src/alt/class/id
+      $('img').each((_, el) => {
+        const src = $(el).attr('src') || '';
+        if (!src || src.startsWith('data:')) return;
+        const alt = ($(el).attr('alt') || '').toLowerCase();
+        const cls = ($(el).attr('class') || '').toLowerCase();
+        const id = ($(el).attr('id') || '').toLowerCase();
+        if (
+          src.toLowerCase().includes('logo') ||
+          alt.includes('logo') ||
+          cls.includes('logo') ||
+          id.includes('logo')
+        ) {
+          candidates.push({ url: src, priority: 3 });
+        }
+      });
+
+      candidates.sort((a, b) => a.priority - b.priority);
+
+      for (const c of candidates) {
+        let url = c.url.trim();
+        if (!url) continue;
+        if (url.startsWith('//')) url = 'https:' + url;
+        else if (url.startsWith('/')) url = baseUrl + url;
+        else if (!url.startsWith('http')) url = `${baseUrl}/${url}`;
+        try {
+          const img = await downloadImage(url, baseUrl);
+          if (img.data.length > 500) return img;
+        } catch { }
+      }
+
+      // ลอง common paths
+      for (const p of ['/images/logo.png', '/img/logo.png', '/assets/logo.png', '/images/logo.jpg', '/img/logo.jpg', '/assets/images/logo.png']) {
+        try {
+          const img = await downloadImage(baseUrl + p, baseUrl);
+          if (img.data.length > 500) return img;
+        } catch { }
+      }
+    } catch { }
+  }
+  return null;
+};
+
+// ─── Source 2: Google S2 Favicon (ทำงานได้แทบทุก domain) ──────────────────
+const fetchGoogleFavicon = async (domain) => {
+  const url = `https://www.google.com/s2/favicons?sz=256&domain_url=https://${domain}`;
+  const img = await downloadImage(url);
+  if (img.data.length < 500) throw new Error('favicon too small (default icon)');
+  return img;
+};
+
+// ─── Source 3: Wikipedia — กรองหา logo/seal/emblem image โดยเฉพาะ ──────────
+const fetchWikipediaLogoImage = async (name) => {
+  // หา page ภาษาไทย
+  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const pageTitle = srData?.query?.search?.[0]?.title;
+  if (!pageTitle) return null;
+
+  // ดึงรายการ images ทั้งหมดของ page
+  const { data: imData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', titles: pageTitle, prop: 'images', imlimit: 50, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const images = Object.values(imData?.query?.pages || {})[0]?.images;
+  if (!images?.length) return null;
+
+  // กรองเฉพาะ logo/seal/emblem/badge
+  const logoFiles = images.filter(({ title }) => {
+    const t = title.toLowerCase();
+    return t.includes('logo') || t.includes('seal') || t.includes('emblem') || t.includes('badge');
+  });
+  if (!logoFiles.length) return null;
+
+  // ดึง URL ของไฟล์แรกที่พบ
+  const { data: infoData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', titles: logoFiles[0].title, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 256, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const imgUrl = Object.values(infoData?.query?.pages || {})[0]?.imageinfo?.[0]?.thumburl;
+  if (!imgUrl) return null;
+  return downloadImage(imgUrl, 'https://th.wikipedia.org');
+};
+
+// ─── Source 4: Wikimedia Commons — ค้นหา logo file ──────────────────────────
+const fetchCommonsLogo = async (name) => {
+  for (const q of [`${name} logo`, `${name} seal`, `${name} emblem`]) {
+    try {
+      const { data: srData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
+        params: { action: 'query', list: 'search', srsearch: q, srnamespace: 6, srlimit: 5, format: 'json' },
+        timeout: 10000, headers: WP_HEADERS,
+      });
+      const files = srData?.query?.search || [];
+      for (const file of files) {
+        const ft = file.title.toLowerCase();
+        if (!ft.includes('logo') && !ft.includes('seal') && !ft.includes('emblem')) continue;
+        try {
+          const { data: infoData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
+            params: { action: 'query', prop: 'imageinfo', titles: file.title, iiprop: 'url', iiurlwidth: 256, format: 'json' },
+            timeout: 10000, headers: WP_HEADERS,
+          });
+          const info = Object.values(infoData?.query?.pages || {})[0]?.imageinfo?.[0];
+          const imgUrl = info?.thumburl || info?.url;
+          if (!imgUrl) continue;
+          const img = await downloadImage(imgUrl, 'https://commons.wikimedia.org');
+          if (img.data.length > 500) return img;
+        } catch { }
+      }
+    } catch { }
+  }
+  return null;
 };
 
 // POST /api/universities/sync-logos  ← ต้องอยู่ก่อน /:id
@@ -532,67 +590,50 @@ router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
     let updated = 0;
     let failed = 0;
     const failedNames = [];
-    const sourceStats = { clearbit: 0, wikipedia_th: 0, wikipedia_en: 0, commons: 0 };
+    const sourceStats = { website: 0, favicon: 0, wikipedia: 0, commons: 0 };
 
     for (const u of unis) {
       let saved = false;
-
-      // ── Source 1: Clearbit (ถ้ามี domain) ──
       const domain = UNI_DOMAINS[u.name];
+
+      // Source 1: Scrape เว็บไซต์มหาวิทยาลัยโดยตรง
       if (domain && !saved) {
         try {
-          const { data, ct } = await fetchClearbitLogo(domain);
-          await saveLogoFile(u.id, data, ct, 'clearbit');
-          sourceStats.clearbit++;
+          const img = await fetchWebsiteLogo(domain);
+          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'web'); sourceStats.website++; saved = true; }
+        } catch { }
+      }
+
+      // Source 2: Google favicon (sz=256)
+      if (domain && !saved) {
+        try {
+          const img = await fetchGoogleFavicon(domain);
+          await saveLogoFile(u.id, img.data, img.ct, 'fav');
+          sourceStats.favicon++;
           saved = true;
-        } catch { /* ลอง source ถัดไป */ }
-      }
-
-      // ── Source 2: Wikipedia Thai ──
-      if (!saved) {
-        try {
-          const img = await fetchWikipediaThaiLogo(u.name);
-          if (img) {
-            await saveLogoFile(u.id, img.data, img.ct, 'wiki-th');
-            sourceStats.wikipedia_th++;
-            saved = true;
-          }
         } catch { }
       }
 
-      // ── Source 3: Wikipedia English ──
+      // Source 3: Wikipedia — เจาะหา logo image โดยเฉพาะ
       if (!saved) {
         try {
-          const img = await fetchWikipediaEnglishLogo(u.name);
-          if (img) {
-            await saveLogoFile(u.id, img.data, img.ct, 'wiki-en');
-            sourceStats.wikipedia_en++;
-            saved = true;
-          }
+          const img = await fetchWikipediaLogoImage(u.name);
+          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'wiki'); sourceStats.wikipedia++; saved = true; }
         } catch { }
       }
 
-      // ── Source 4: Wikimedia Commons ──
+      // Source 4: Wikimedia Commons
       if (!saved) {
         try {
           const img = await fetchCommonsLogo(u.name);
-          if (img) {
-            await saveLogoFile(u.id, img.data, img.ct, 'commons');
-            sourceStats.commons++;
-            saved = true;
-          }
+          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'commons'); sourceStats.commons++; saved = true; }
         } catch { }
       }
 
-      if (saved) {
-        updated++;
-      } else {
-        failed++;
-        failedNames.push(u.name);
-      }
+      if (saved) updated++;
+      else { failed++; failedNames.push(u.name); }
 
-      // หน่วงเพื่อไม่โดน rate-limit
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 300));
     }
 
     res.json({

@@ -17,7 +17,8 @@ router.get('/', verifyToken, async (req, res) => {
          last_name,
          class_level,
          class_room,
-         number_in_room
+         number_in_room,
+         citizen_id
        FROM school_app.students
        WHERE year_id = ?
          AND (

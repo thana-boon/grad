@@ -492,9 +492,9 @@ export default function UniversitiesPage() {
                 </p>
                 {syncLogoResult.sourceStats && (
                   <p className="text-xs mt-1 opacity-70">
-                    📦 Clearbit: {syncLogoResult.sourceStats.clearbit}
-                    · 🌏 Wiki-TH: {syncLogoResult.sourceStats.wikipedia_th}
-                    · 🌐 Wiki-EN: {syncLogoResult.sourceStats.wikipedia_en}
+                    🌐 เว็บไซต์: {syncLogoResult.sourceStats.website}
+                    · 🔖 Favicon: {syncLogoResult.sourceStats.favicon}
+                    · 📖 Wikipedia: {syncLogoResult.sourceStats.wikipedia}
                     · 🖼️ Commons: {syncLogoResult.sourceStats.commons}
                   </p>
                 )}

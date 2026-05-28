@@ -7,6 +7,12 @@ import AccountsPage from './pages/admin/AccountsPage';
 import AcademicYearsPage from './pages/admin/AcademicYearsPage';
 import StudentsPage from './pages/admin/StudentsPage';
 import UniversitiesPage from './pages/admin/UniversitiesPage';
+import FacultiesPage from './pages/admin/FacultiesPage';
+import StudentPage from './pages/StudentPage';
+import AdmissionStatusPage from './pages/admin/AdmissionStatusPage';
+import PrintReportPage from './pages/admin/PrintReportPage';
+import AdmissionTableReportPage from './pages/admin/AdmissionTableReportPage';
+import PrintAdmissionTablePage from './pages/admin/PrintAdmissionTablePage';
 
 export default function App() {
   return (
@@ -52,6 +58,48 @@ export default function App() {
             element={
               <ProtectedRoute allowedRole="admin">
                 <DashboardPage activePage="universities" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/faculties"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="faculties" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/admission-status"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="admission-status" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/report"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="report" />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/admin/report/print" element={<PrintReportPage />} />
+          <Route path="/admin/report-table/print" element={<PrintAdmissionTablePage />} />
+          <Route
+            path="/admin/report-table"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="report-table" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student"
+            element={
+              <ProtectedRoute allowedRole="student">
+                <StudentPage />
               </ProtectedRoute>
             }
           />

@@ -10,6 +10,8 @@ export function ProtectedRoute({ children, allowedRole }) {
   }
 
   if (allowedRole && user.role !== allowedRole) {
+    // redirect ให้ตรงกับ role จริง
+    if (user.role === 'student') return <Navigate to="/student" replace />;
     return <Navigate to="/dashboard" replace />;
   }
 

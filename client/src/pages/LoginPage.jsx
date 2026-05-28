@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
+const BASE = import.meta.env.VITE_API_URL;
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
@@ -10,9 +12,8 @@ export default function LoginPage() {
   const [form, setForm] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [countdown, setCountdown] = useState(0); // วินาทีที่ต้องรอ
+  const [countdown, setCountdown] = useState(0);
 
-  // นับถอยหลัง countdown
   useEffect(() => {
     if (countdown <= 0) return;
     const timer = setTimeout(() => setCountdown((c) => c - 1), 1000);
@@ -28,19 +29,42 @@ export default function LoginPage() {
     e.preventDefault();
     if (countdown > 0) return;
     setLoading(true);
+    setError('');
+
+    const rawUsername = form.username.trim();
+
     try {
-      const res = await axios.post(
-        `${import.meta.env.VITE_API_URL}/auth/login`,
-        form
-      );
+      // ลองเป็น admin ก่อน
+      const res = await axios.post(`${BASE}/auth/login`, {
+        username: rawUsername,
+        password: form.password,
+      });
       login(res.data.user, res.data.token);
       navigate('/dashboard');
-    } catch (err) {
-      if (err.response?.status === 429) {
-        const secs = err.response.data?.retryAfterSeconds || 900;
+      return;
+    } catch (adminErr) {
+      if (adminErr.response?.status === 429) {
+        const secs = adminErr.response.data?.retryAfterSeconds || 900;
+        setCountdown(secs);
+        setLoading(false);
+        return;
+      }
+      // admin ไม่ผ่าน → ลอง student (pad 5 หลัก)
+    }
+
+    try {
+      const res = await axios.post(`${BASE}/student/login`, {
+        username: rawUsername.padStart(5, '0'),
+        password: form.password,
+      });
+      login(res.data.user, res.data.token);
+      navigate('/student');
+    } catch (studentErr) {
+      if (studentErr.response?.status === 429) {
+        const secs = studentErr.response.data?.retryAfterSeconds || 900;
         setCountdown(secs);
       }
-      setError(err.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
+      setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     } finally {
       setLoading(false);
     }
@@ -58,7 +82,7 @@ export default function LoginPage() {
                 <span>G</span>
               </div>
             </div>
-          <h1 className="text-xl font-semibold">GradTrack ✨</h1>
+            <h1 className="text-xl font-semibold">GradTrack ✨</h1>
             <p className="text-base-content/50 text-xs mt-1">ระบบติดตามผลการเรียน 📚</p>
           </div>
 
@@ -66,14 +90,14 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             <label className="form-control w-full">
               <div className="label">
-                <span className="label-text text-xs">👤 ชื่อผู้ใช้</span>
+                <span className="label-text text-xs">👤 ชื่อผู้ใช้ / รหัสนักเรียน</span>
               </div>
               <input
                 type="text"
                 name="username"
                 value={form.username}
                 onChange={handleChange}
-                placeholder="กรอกชื่อผู้ใช้"
+                placeholder="กรอกชื่อผู้ใช้หรือรหัสนักเรียน"
                 required
                 className="input input-bordered input-sm w-full"
               />
@@ -106,7 +130,7 @@ export default function LoginPage() {
               <div role="alert" className="alert alert-warning">
                 <span>
                   ล็อคชั่วคราว รอ{' '}
-                  <span className="font-bold countdown">
+                  <span className="font-bold">
                     {Math.floor(countdown / 60)}:{String(countdown % 60).padStart(2, '0')}
                   </span>{' '}
                   นาที

@@ -57,7 +57,7 @@ export default function StudentsPage() {
   // กรองตาม search + room
   const filtered = useMemo(() => {
     return students.filter((s) => {
-      const full = `${s.student_code} ${s.first_name} ${s.last_name} ${s.class_room}`.toLowerCase();
+      const full = `${s.student_code} ${s.first_name} ${s.last_name} ${s.class_room} ${s.citizen_id ?? ''}`.toLowerCase();
       const matchSearch = !search || full.includes(search.toLowerCase());
       const matchRoom = !filterRoom || s.class_room === filterRoom;
       return matchSearch && matchRoom;
@@ -151,25 +151,26 @@ export default function StudentsPage() {
               <th>🏷️ ชั้น</th>
               <th>🏫 ห้อง</th>
               <th>เลขที่</th>
+              <th>เลขประชาชน</th>
             </tr>
           </thead>
           <tbody>
             {initializing || loading ? (
               <tr>
-                <td colSpan={7} className="text-center py-12 text-base-content/40">
+                  <td className="text-center py-12 text-base-content/40" colSpan={8}>
                   <span className="loading loading-spinner loading-sm mr-2" />
                   กำลังโหลด...
                 </td>
               </tr>
             ) : !selectedYearId ? (
               <tr>
-                <td colSpan={7} className="text-center py-12 text-base-content/30">
+                <td colSpan={8} className="text-center py-12 text-base-content/30">
                   กรุณาเลือกปีการศึกษา
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center py-12 text-base-content/30">
+                <td colSpan={8} className="text-center py-12 text-base-content/30">
                   {students.length === 0 ? 'ไม่พบนักเรียน ม.6 ในปีการศึกษานี้' : 'ไม่พบข้อมูลที่ค้นหา'}
                 </td>
               </tr>
@@ -185,6 +186,7 @@ export default function StudentsPage() {
                   </td>
                   <td>{s.class_room}</td>
                   <td className="text-center">{s.number_in_room}</td>
+                  <td className="font-mono text-xs tracking-widest">{s.citizen_id || <span className="text-base-content/30">—</span>}</td>
                 </tr>
               ))
             )}
