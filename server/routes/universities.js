@@ -306,6 +306,308 @@ router.post('/sync', verifyToken, adminOnly, async (req, res) => {
   }
 });
 
+// ─── Domain mapping สำหรับ Clearbit logo ─────────────────────────────────
+const UNI_DOMAINS = {
+  'จุฬาลงกรณ์มหาวิทยาลัย': 'chula.ac.th',
+  'มหาวิทยาลัยเกษตรศาสตร์': 'ku.ac.th',
+  'มหาวิทยาลัยเชียงใหม่': 'cmu.ac.th',
+  'มหาวิทยาลัยธรรมศาสตร์': 'tu.ac.th',
+  'มหาวิทยาลัยมหิดล': 'mahidol.ac.th',
+  'มหาวิทยาลัยศิลปากร': 'su.ac.th',
+  'มหาวิทยาลัยสงขลานครินทร์': 'psu.ac.th',
+  'มหาวิทยาลัยขอนแก่น': 'kku.ac.th',
+  'มหาวิทยาลัยบูรพา': 'buu.ac.th',
+  'มหาวิทยาลัยนเรศวร': 'nu.ac.th',
+  'มหาวิทยาลัยศรีนครินทรวิโรฒ': 'swu.ac.th',
+  'มหาวิทยาลัยรามคำแหง': 'ru.ac.th',
+  'มหาวิทยาลัยสุโขทัยธรรมาธิราช': 'stou.ac.th',
+  'มหาวิทยาลัยแม่ฟ้าหลวง': 'mfu.ac.th',
+  'มหาวิทยาลัยวลัยลักษณ์': 'wu.ac.th',
+  'มหาวิทยาลัยแม่โจ้': 'mju.ac.th',
+  'มหาวิทยาลัยอุบลราชธานี': 'ubu.ac.th',
+  'มหาวิทยาลัยมหาสารคาม': 'msu.ac.th',
+  'มหาวิทยาลัยทักษิณ': 'tsu.ac.th',
+  'มหาวิทยาลัยพะเยา': 'up.ac.th',
+  'มหาวิทยาลัยนครพนม': 'npu.ac.th',
+  'มหาวิทยาลัยกาฬสินธุ์': 'ksu.ac.th',
+  'มหาวิทยาลัยนราธิวาสราชนครินทร์': 'pnu.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าธนบุรี': 'kmutt.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ': 'kmutnb.ac.th',
+  'สถาบันเทคโนโลยีพระจอมเกล้าเจ้าคุณทหารลาดกระบัง': 'kmitl.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีสุรนารี': 'sut.ac.th',
+  'สถาบันเทคโนโลยีปทุมวัน': 'pit.ac.th',
+  'สถาบันบัณฑิตพัฒนบริหารศาสตร์': 'nida.ac.th',
+  'สถาบันเทคโนโลยีไทย-ญี่ปุ่น': 'tni.ac.th',
+  'วิทยาลัยแพทยศาสตร์พระมงกุฎเกล้า': 'pcm.ac.th',
+  // ราชภัฏ
+  'มหาวิทยาลัยราชภัฏกรุงเทพ': 'rbg.ac.th',
+  'มหาวิทยาลัยราชภัฏเชียงใหม่': 'cmru.ac.th',
+  'มหาวิทยาลัยราชภัฏเชียงราย': 'crru.ac.th',
+  'มหาวิทยาลัยราชภัฏลำปาง': 'lpru.ac.th',
+  'มหาวิทยาลัยราชภัฏอุตรดิตถ์': 'uru.ac.th',
+  'มหาวิทยาลัยราชภัฏพิบูลสงคราม': 'psru.ac.th',
+  'มหาวิทยาลัยราชภัฏนครสวรรค์': 'nsru.ac.th',
+  'มหาวิทยาลัยราชภัฏวไลยอลงกรณ์ ในพระบรมราชูปถัมภ์': 'vru.ac.th',
+  'มหาวิทยาลัยราชภัฏเทพสตรี': 'tru.ac.th',
+  'มหาวิทยาลัยราชภัฏจันทรเกษม': 'chandra.ac.th',
+  'มหาวิทยาลัยราชภัฏสวนสุนันทา': 'ssru.ac.th',
+  'มหาวิทยาลัยราชภัฏบ้านสมเด็จเจ้าพระยา': 'bsru.ac.th',
+  'มหาวิทยาลัยราชภัฏพระนคร': 'pnru.ac.th',
+  'มหาวิทยาลัยราชภัฏราชนครินทร์': 'rru.ac.th',
+  'มหาวิทยาลัยราชภัฏรำไพพรรณี': 'rbru.ac.th',
+  'มหาวิทยาลัยราชภัฏนครราชสีมา': 'nrru.ac.th',
+  'มหาวิทยาลัยราชภัฏบุรีรัมย์': 'bru.ac.th',
+  'มหาวิทยาลัยราชภัฏสุรินทร์': 'srru.ac.th',
+  'มหาวิทยาลัยราชภัฏศรีสะเกษ': 'sskru.ac.th',
+  'มหาวิทยาลัยราชภัฏอุดรธานี': 'udru.ac.th',
+  'มหาวิทยาลัยราชภัฏเลย': 'lru.ac.th',
+  'มหาวิทยาลัยราชภัฏสกลนคร': 'snru.ac.th',
+  'มหาวิทยาลัยราชภัฏมหาสารคาม': 'rmu.ac.th',
+  'มหาวิทยาลัยราชภัฏร้อยเอ็ด': 'reru.ac.th',
+  'มหาวิทยาลัยราชภัฏกาฬสินธุ์': 'ksr.ac.th',
+  'มหาวิทยาลัยราชภัฏอุบลราชธานี': 'ubru.ac.th',
+  'มหาวิทยาลัยราชภัฏชัยภูมิ': 'cpru.ac.th',
+  'มหาวิทยาลัยราชภัฏสุราษฎร์ธานี': 'sru.ac.th',
+  'มหาวิทยาลัยราชภัฏนครศรีธรรมราช': 'nstru.ac.th',
+  'มหาวิทยาลัยราชภัฏภูเก็ต': 'pkru.ac.th',
+  'มหาวิทยาลัยราชภัฏสงขลา': 'skru.ac.th',
+  'มหาวิทยาลัยราชภัฏยะลา': 'yru.ac.th',
+  // ราชมงคล
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลธัญบุรี': 'rmutt.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลกรุงเทพ': 'rmutk.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลตะวันออก': 'rmutto.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลพระนคร': 'rmutp.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลรัตนโกสินทร์': 'rmutr.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลล้านนา': 'rmutl.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลศรีวิชัย': 'rmutsv.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลสุวรรณภูมิ': 'rmutsb.ac.th',
+  'มหาวิทยาลัยเทคโนโลยีราชมงคลอีสาน': 'rmuti.ac.th',
+  // เอกชน
+  'มหาวิทยาลัยรังสิต': 'rsu.ac.th',
+  'มหาวิทยาลัยอัสสัมชัญ': 'au.ac.th',
+  'มหาวิทยาลัยกรุงเทพ': 'bu.ac.th',
+  'มหาวิทยาลัยหอการค้าไทย': 'utcc.ac.th',
+  'มหาวิทยาลัยธุรกิจบัณฑิตย์': 'dpu.ac.th',
+  'มหาวิทยาลัยเกษมบัณฑิต': 'kbu.ac.th',
+  'มหาวิทยาลัยสยาม': 'siam.edu',
+  'มหาวิทยาลัยอีสเทิร์นเอเชีย': 'eau.ac.th',
+  'มหาวิทยาลัยเวสเทิร์น': 'western.ac.th',
+  'มหาวิทยาลัยนานาชาติแสตมฟอร์ด': 'stamford.edu',
+  'มหาวิทยาลัยกรุงเทพธนบุรี': 'bkkthon.ac.th',
+  'มหาวิทยาลัยราชพฤกษ์': 'rpu.ac.th',
+  'มหาวิทยาลัยเจ้าพระยา': 'cpu.ac.th',
+  'มหาวิทยาลัยศรีปทุม': 'spu.ac.th',
+  'มหาวิทยาลัยนานาชาติเอเชีย-แปซิฟิก': 'apiu.edu',
+  'มหาวิทยาลัยพายัพ': 'payap.ac.th',
+  'มหาวิทยาลัยนอร์ท-เชียงใหม่': 'northcm.ac.th',
+};
+
+// ─── Helper: ดาวน์โหลดรูป → Buffer ─────────────────────────────────────────
+const downloadImage = async (url, referer) => {
+  const headers = { 'User-Agent': 'GradTrack/1.0 (Educational)' };
+  if (referer) headers['Referer'] = referer;
+  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000, headers });
+  const ct = (res.headers['content-type'] || '').split(';')[0].trim();
+  if (!ct.startsWith('image/') && ct !== 'image/svg+xml') throw new Error(`Not image: ${ct}`);
+  return { data: Buffer.from(res.data), ct };
+};
+
+const CT_TO_EXT = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+  'image/svg+xml': '.svg', 'image/webp': '.webp', 'image/x-icon': '.ico',
+};
+const getExt = (ct, fallbackUrl = '') =>
+  CT_TO_EXT[ct] || path.extname(fallbackUrl.split('?')[0]) || '.png';
+
+const WP_HEADERS = { 'User-Agent': 'GradTrack/1.0 (Educational)', Accept: 'application/json' };
+
+// ─── Source 1: Clearbit logo จาก domain ─────────────────────────────────────
+const fetchClearbitLogo = async (domain) => {
+  const url = `https://logo.clearbit.com/${domain}?size=256`;
+  return downloadImage(url);
+};
+
+// ─── Source 2: Wikipedia Thai — search แล้วค่อยดึง pageimages ───────────────
+const fetchWikipediaThaiLogo = async (name) => {
+  // step 1: หาชื่อ page จริงๆ ด้วย search
+  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const pageTitle = srData?.query?.search?.[0]?.title;
+  if (!pageTitle) return null;
+
+  // step 2: ดึง thumbnail
+  const { data: imgData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', titles: pageTitle, prop: 'pageimages', pithumbsize: 300, pilicense: 'any', format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const pages = imgData?.query?.pages;
+  const thumbUrl = pages && Object.values(pages)[0]?.thumbnail?.source;
+  if (!thumbUrl) return null;
+  const img = await downloadImage(thumbUrl);
+  return img;
+};
+
+// ─── Source 3: Wikipedia English (ผ่าน Wikidata cross-language) ─────────────
+const fetchWikipediaEnglishLogo = async (name) => {
+  // หา Wikidata item จากชื่อ Thai Wikipedia
+  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const thTitle = srData?.query?.search?.[0]?.title;
+  if (!thTitle) return null;
+
+  // หา English title จาก langlinks
+  const { data: llData } = await axios.get('https://th.wikipedia.org/w/api.php', {
+    params: { action: 'query', titles: thTitle, prop: 'langlinks', lllang: 'en', lllimit: 1, format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const llPages = llData?.query?.pages;
+  const enTitle = llPages && Object.values(llPages)[0]?.langlinks?.[0]?.['*'];
+  if (!enTitle) return null;
+
+  // ดึง pageimages จาก en.wikipedia
+  const { data: enImg } = await axios.get('https://en.wikipedia.org/w/api.php', {
+    params: { action: 'query', titles: enTitle, prop: 'pageimages', pithumbsize: 300, pilicense: 'any', format: 'json' },
+    timeout: 10000, headers: WP_HEADERS,
+  });
+  const enPages = enImg?.query?.pages;
+  const thumbUrl = enPages && Object.values(enPages)[0]?.thumbnail?.source;
+  if (!thumbUrl) return null;
+  return downloadImage(thumbUrl);
+};
+
+// ─── Source 4: Wikimedia Commons — ค้นหา logo file ─────────────────────────
+const fetchCommonsLogo = async (name) => {
+  const queries = [`${name} logo`, `${name} seal`, name];
+  for (const q of queries) {
+    try {
+      const { data: srData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
+        params: { action: 'query', list: 'search', srsearch: q, srnamespace: 6, srlimit: 5, format: 'json' },
+        timeout: 10000, headers: WP_HEADERS,
+      });
+      const files = srData?.query?.search;
+      if (!files?.length) continue;
+
+      for (const file of files) {
+        try {
+          const { data: infoData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
+            params: { action: 'query', prop: 'imageinfo', titles: file.title, iiprop: 'url', iiurlwidth: 256, format: 'json' },
+            timeout: 10000, headers: WP_HEADERS,
+          });
+          const infoPages = infoData?.query?.pages;
+          const info = infoPages && Object.values(infoPages)[0]?.imageinfo?.[0];
+          const imgUrl = info?.thumburl || info?.url;
+          if (!imgUrl) continue;
+          const img = await downloadImage(imgUrl, 'https://commons.wikimedia.org');
+          return img;
+        } catch { /* ลอง file ถัดไป */ }
+      }
+    } catch { /* ลอง query ถัดไป */ }
+  }
+  return null;
+};
+
+// ─── Helper: บันทึกไฟล์ + อัปเดต DB ─────────────────────────────────────────
+const saveLogoFile = async (uniId, imgBuffer, ct, source) => {
+  const ext = getExt(ct);
+  const filename = `logo-${source}-${uniId}-${Date.now()}${ext}`;
+  fs.writeFileSync(path.join(LOGO_DIR, filename), imgBuffer);
+  await db.query('UPDATE `universities` SET logo_url = ? WHERE id = ?', [`/uploads/logos/${filename}`, uniId]);
+};
+
+// POST /api/universities/sync-logos  ← ต้องอยู่ก่อน /:id
+router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await ensureTable();
+    const [unis] = await db.query(
+      'SELECT id, name FROM `universities` WHERE logo_url IS NULL OR logo_url = "" ORDER BY id ASC'
+    );
+    if (unis.length === 0) {
+      return res.json({ message: 'ทุก university มี logo แล้ว', updated: 0, failed: 0, total: 0 });
+    }
+
+    let updated = 0;
+    let failed = 0;
+    const failedNames = [];
+    const sourceStats = { clearbit: 0, wikipedia_th: 0, wikipedia_en: 0, commons: 0 };
+
+    for (const u of unis) {
+      let saved = false;
+
+      // ── Source 1: Clearbit (ถ้ามี domain) ──
+      const domain = UNI_DOMAINS[u.name];
+      if (domain && !saved) {
+        try {
+          const { data, ct } = await fetchClearbitLogo(domain);
+          await saveLogoFile(u.id, data, ct, 'clearbit');
+          sourceStats.clearbit++;
+          saved = true;
+        } catch { /* ลอง source ถัดไป */ }
+      }
+
+      // ── Source 2: Wikipedia Thai ──
+      if (!saved) {
+        try {
+          const img = await fetchWikipediaThaiLogo(u.name);
+          if (img) {
+            await saveLogoFile(u.id, img.data, img.ct, 'wiki-th');
+            sourceStats.wikipedia_th++;
+            saved = true;
+          }
+        } catch { }
+      }
+
+      // ── Source 3: Wikipedia English ──
+      if (!saved) {
+        try {
+          const img = await fetchWikipediaEnglishLogo(u.name);
+          if (img) {
+            await saveLogoFile(u.id, img.data, img.ct, 'wiki-en');
+            sourceStats.wikipedia_en++;
+            saved = true;
+          }
+        } catch { }
+      }
+
+      // ── Source 4: Wikimedia Commons ──
+      if (!saved) {
+        try {
+          const img = await fetchCommonsLogo(u.name);
+          if (img) {
+            await saveLogoFile(u.id, img.data, img.ct, 'commons');
+            sourceStats.commons++;
+            saved = true;
+          }
+        } catch { }
+      }
+
+      if (saved) {
+        updated++;
+      } else {
+        failed++;
+        failedNames.push(u.name);
+      }
+
+      // หน่วงเพื่อไม่โดน rate-limit
+      await new Promise((r) => setTimeout(r, 400));
+    }
+
+    res.json({
+      message: 'Sync logo สำเร็จ',
+      total: unis.length,
+      updated,
+      failed,
+      sourceStats,
+      failedNames: failedNames.slice(0, 30),
+    });
+  } catch (err) {
+    res.status(500).json({ message: `Sync logo ไม่สำเร็จ: ${err.message}` });
+  }
+});
+
 // POST /api/universities  (สร้างใหม่)
 router.post('/', verifyToken, adminOnly, (req, res) => {
   logoUpload(req, res, async (err) => {

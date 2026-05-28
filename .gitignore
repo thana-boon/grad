@@ -9,6 +9,9 @@ node_modules/
 .env
 .env.local
 .env.production
+**/.env
+**/.env.local
+**/.env.production
 
 # Build output
 client/dist/
@@ -18,6 +21,10 @@ client/.vite/
 *.log
 npm-debug.log*
 logs/
+server/logs/
+
+# Uploaded files (logo, csv, etc.)
+server/uploads/
 
 # Editor
 .vscode/settings.json

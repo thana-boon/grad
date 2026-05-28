@@ -21,9 +21,14 @@ export default function UniversitiesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Sync
+  // Sync ชื่อ
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+
+  // Sync Logo
+  const [syncingLogos, setSyncingLogos] = useState(false);
+  const [syncLogoResult, setSyncLogoResult] = useState(null);
+  const [logoSyncProgress, setLogoSyncProgress] = useState({ current: 0, total: 0 });
 
   // Toast
   const [toast, setToast] = useState(null);
@@ -143,7 +148,7 @@ export default function UniversitiesPage() {
     }
   };
 
-  // ─── Sync ────────────────────────────────────────────────────────────────
+  // ─── Sync ชื่อ ──────────────────────────────────────────────────────────
   const handleSync = async () => {
     setSyncing(true);
     setSyncResult(null);
@@ -155,6 +160,28 @@ export default function UniversitiesPage() {
       setSyncResult({ ok: false, message: err.response?.data?.message || 'Sync ไม่สำเร็จ' });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // ─── Sync Logo ───────────────────────────────────────────────────────────
+  const handleSyncLogos = async () => {
+    const noLogo = unis.filter((u) => !u.logo_url);
+    if (noLogo.length === 0) {
+      showToast('ทุก university มี logo แล้ว ✅');
+      return;
+    }
+    setSyncingLogos(true);
+    setSyncLogoResult(null);
+    setLogoSyncProgress({ current: 0, total: noLogo.length });
+    try {
+      const res = await api.post('/universities/sync-logos', {}, { timeout: 300000 });
+      setSyncLogoResult({ ok: true, ...res.data });
+      load();
+    } catch (err) {
+      setSyncLogoResult({ ok: false, message: err.response?.data?.message || 'Sync logo ไม่สำเร็จ' });
+    } finally {
+      setSyncingLogos(false);
+      setLogoSyncProgress({ current: 0, total: 0 });
     }
   };
 
@@ -194,10 +221,21 @@ export default function UniversitiesPage() {
           <button
             className="btn btn-outline btn-sm gap-1"
             onClick={handleSync}
-            disabled={syncing}
+            disabled={syncing || syncingLogos}
           >
             {syncing ? <span className="loading loading-spinner loading-xs" /> : '🔄'}
-            Sync จากเว็บ
+            Sync ชื่อ
+          </button>
+          <button
+            className="btn btn-outline btn-sm gap-1"
+            onClick={handleSyncLogos}
+            disabled={syncing || syncingLogos}
+            title={`Sync logo สำหรับ ${unis.filter(u => !u.logo_url).length} รายการที่ยังไม่มี logo`}
+          >
+            {syncingLogos ? <span className="loading loading-spinner loading-xs" /> : '🖼️'}
+            Sync Logo {unis.filter(u => !u.logo_url).length > 0 && !syncingLogos && (
+              <span className="badge badge-sm badge-warning">{unis.filter(u => !u.logo_url).length}</span>
+            )}
           </button>
           <button className="btn btn-primary btn-sm gap-1" onClick={openCreate}>
             ➕ เพิ่มมหาวิทยาลัย
@@ -440,13 +478,60 @@ export default function UniversitiesPage() {
         </div>
       )}
 
+      {/* ─── Sync Logo result ─── */}
+      {syncLogoResult && (
+        <div className={`alert ${syncLogoResult.ok ? 'alert-success' : 'alert-error'} mb-4 py-3 text-sm`}>
+          <div className="flex-1">
+            {syncLogoResult.ok ? (
+              <>
+                <p>🖼️ {syncLogoResult.message}</p>
+                <p className="text-xs mt-1 opacity-80">
+                  อัปเดตสำเร็จ <strong>{syncLogoResult.updated}</strong> รายการ
+                  · หาไม่พบ <strong>{syncLogoResult.failed}</strong> รายการ
+                  · ทั้งหมด {syncLogoResult.total} รายการ
+                </p>
+                {syncLogoResult.sourceStats && (
+                  <p className="text-xs mt-1 opacity-70">
+                    📦 Clearbit: {syncLogoResult.sourceStats.clearbit}
+                    · 🌏 Wiki-TH: {syncLogoResult.sourceStats.wikipedia_th}
+                    · 🌐 Wiki-EN: {syncLogoResult.sourceStats.wikipedia_en}
+                    · 🖼️ Commons: {syncLogoResult.sourceStats.commons}
+                  </p>
+                )}
+                {syncLogoResult.failedNames?.length > 0 && (
+                  <p className="text-xs mt-1 opacity-60">
+                    ⚠️ หาไม่พบ: {syncLogoResult.failedNames.join(', ')}
+                    {syncLogoResult.failed > 20 ? ` และอีก ${syncLogoResult.failed - 20} รายการ` : ''}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p>❌ {syncLogoResult.message}</p>
+            )}
+          </div>
+          <button className="btn btn-ghost btn-xs" onClick={() => setSyncLogoResult(null)}>✕</button>
+        </div>
+      )}
+
       {/* ─── Sync Loading Overlay ─── */}
-      {syncing && (
+      {(syncing || syncingLogos) && (
         <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center">
-          <div className="card bg-base-100 p-8 flex flex-col items-center gap-3 shadow-xl">
+          <div className="card bg-base-100 p-8 flex flex-col items-center gap-3 shadow-xl min-w-64">
             <span className="loading loading-spinner loading-lg text-primary" />
-            <p className="font-medium text-sm">กำลัง Sync ข้อมูลจาก Wikipedia...</p>
-            <p className="text-xs text-base-content/50">อาจใช้เวลาสักครู่</p>
+            {syncing ? (
+              <>
+                <p className="font-medium text-sm">กำลัง Sync ชื่อจาก Wikipedia...</p>
+                <p className="text-xs text-base-content/50">อาจใช้เวลาสักครู่</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-sm">🖼️ กำลัง Sync Logo จาก Wikipedia...</p>
+                <p className="text-xs text-base-content/50">
+                  ดึงรูป {unis.filter(u => !u.logo_url).length} มหาวิทยาลัย · อาจใช้เวลา 1-2 นาที
+                </p>
+                <p className="text-xs text-base-content/40">กรุณาอย่าปิดหน้าต่างนี้</p>
+              </>
+            )}
           </div>
         </div>
       )}
