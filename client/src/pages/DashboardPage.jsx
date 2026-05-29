@@ -10,6 +10,7 @@ import FacultiesPage from './admin/FacultiesPage';
 import AdmissionStatusPage from './admin/AdmissionStatusPage';
 import ReportPage from './admin/ReportPage';
 import AdmissionTableReportPage from './admin/AdmissionTableReportPage';
+import ActivityLogPage from './admin/ActivityLogPage';
 
 const ADMIN_MENU = [
   { label: 'dashboard', path: '/dashboard', icon: '🏠' },
@@ -20,7 +21,8 @@ const ADMIN_MENU = [
   { label: 'คณะ/สาขา', path: '/admin/faculties', icon: '🏫' },
   { label: 'สถานะผลสอบ', path: '/admin/admission-status', icon: '📋' },
   { label: 'รายงาน/Export', path: '/admin/report', icon: '📊' },
-  { label: 'รายงานตาราง', path: '/admin/report-table', icon: '📋' },
+  { label: 'รายงานตาราง', path: '/admin/report-table', icon: '�️' },
+  { label: 'Activity Log', path: '/admin/activity-log', icon: '🗒️' },
 ];
 
 export default function DashboardPage({ activePage }) {
@@ -42,6 +44,7 @@ export default function DashboardPage({ activePage }) {
     if (activePage === 'admission-status') return <AdmissionStatusPage />;
     if (activePage === 'report') return <ReportPage />;
     if (activePage === 'report-table') return <AdmissionTableReportPage />;
+    if (activePage === 'activity-log') return <ActivityLogPage />;
     return <AdminDashboard />;
   };
 

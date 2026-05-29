@@ -8,6 +8,7 @@ const db = require('../config/db');
 const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
 const { loginLimiter } = require('../middlewares/rateLimiter');
 const logger = require('../config/logger');
+const { logActivity } = require('./activityLogs');
 
 // ─── Auto-create tables ───────────────────────────────────────────────────────
 const ensureProfileTable = async () => {
@@ -101,9 +102,9 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
     if (codes.length > 0) {
       const [admissions] = await db.query(
         `SELECT sa.student_code, sa.id, sa.university_id, sa.faculty_id, sa.program_id, sa.confirmed,
-                u.name AS university_name, u.logo_url,
-                f.name AS faculty_name,
-                p.name AS program_name
+                u.name_th AS university_name, u.logo_url,
+                f.name_th AS faculty_name,
+                p.program_name_th AS program_name
          FROM student_admissions sa
          JOIN universities u ON u.id = sa.university_id
          JOIN faculties f ON f.id = sa.faculty_id
@@ -196,6 +197,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     );
 
     logger.info('Student login success', { student_code: student.student_code, ip: req.ip });
+    logActivity({ username: paddedCode, name: `${student.first_name} ${student.last_name}`, role: 'student', action: 'login', target: '', detail: null });
 
     res.json({
       token,
@@ -296,9 +298,9 @@ router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
     const code = req.user.student_code;
     const [rows] = await db.query(
       `SELECT sa.id, sa.university_id, sa.faculty_id, sa.program_id, sa.confirmed,
-              u.name AS university_name, u.logo_url,
-              f.name AS faculty_name,
-              p.name AS program_name
+              u.name_th AS university_name, u.logo_url,
+              f.name_th AS faculty_name,
+              p.program_name_th AS program_name
        FROM student_admissions sa
        JOIN universities u ON u.id = sa.university_id
        JOIN faculties f ON f.id = sa.faculty_id
@@ -334,6 +336,9 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
        VALUES (?, ?, ?, ?)`,
       [code, university_id, faculty_id, program_id]
     );
+    // log
+    const [[uniRow]] = await db.query('SELECT name_th AS name FROM universities WHERE id = ? LIMIT 1', [university_id]).catch(() => [[null]]);
+    logActivity({ username: code, name: '', role: 'student', action: 'add_admission', target: uniRow?.name || String(university_id), detail: { university_id, faculty_id, program_id } });
     res.json({ message: 'เพิ่มแล้ว' });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
@@ -377,6 +382,7 @@ router.post('/admissions/:id/confirm', verifyToken, studentOnly, async (req, res
     if (row.confirmed) return res.status(400).json({ message: 'ยืนยันสิทธิ์แล้ว' });
 
     await db.query('UPDATE student_admissions SET confirmed = 1 WHERE id = ?', [id]);
+    logActivity({ username: code, name: '', role: 'student', action: 'confirm_admission', target: `admission#${id}`, detail: null });
     res.json({ message: 'ยืนยันสิทธิ์เรียบร้อยแล้ว 🎉' });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -397,6 +403,7 @@ router.post('/admissions/:id/unconfirm', verifyToken, studentOnly, async (req, r
     if (!row.confirmed) return res.status(400).json({ message: 'ยังไม่ได้ยืนยัน' });
 
     await db.query('UPDATE student_admissions SET confirmed = 0 WHERE id = ?', [id]);
+    logActivity({ username: code, name: '', role: 'student', action: 'unconfirm_admission', target: `admission#${id}`, detail: null });
     res.json({ message: 'ยกเลิกการยืนยันแล้ว' });
   } catch (err) {
     res.status(500).json({ message: err.message });

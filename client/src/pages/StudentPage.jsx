@@ -125,7 +125,7 @@ function AdmissionForm({ onSaved, onCancel }) {
       <div className="relative">
         <input
           className="input input-bordered input-sm w-full"
-          placeholder="🔬 พิมพ์เพื่อค้นหาสาขา"
+          placeholder="🔬 พิมพ์เพื่อค้นหาหลักสูตร / สาขา"
           value={progSearch}
           disabled={!selFaculty || !programs.length}
           onChange={e => { setProgSearch(e.target.value); setShowProgDropdown(true); setSelProgram(''); }}
@@ -133,16 +133,31 @@ function AdmissionForm({ onSaved, onCancel }) {
           onBlur={() => setTimeout(() => setShowProgDropdown(false), 150)}
         />
         {showProgDropdown && programs.length > 0 && (
-          <div className="absolute z-50 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-52 overflow-y-auto mt-1">
-            {programs.filter(p => p.name.toLowerCase().includes(progSearch.toLowerCase())).length === 0
-              ? <div className="px-3 py-2 text-sm opacity-50">ไม่พบสาขา</div>
-              : programs.filter(p => p.name.toLowerCase().includes(progSearch.toLowerCase())).map(p => (
+          <div className="absolute z-50 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-60 overflow-y-auto mt-1">
+            {programs.filter(p =>
+              p.name.toLowerCase().includes(progSearch.toLowerCase()) ||
+              (p.field_name_th || '').toLowerCase().includes(progSearch.toLowerCase())
+            ).length === 0
+              ? <div className="px-3 py-2 text-sm opacity-50">ไม่พบหลักสูตร</div>
+              : programs.filter(p =>
+                  p.name.toLowerCase().includes(progSearch.toLowerCase()) ||
+                  (p.field_name_th || '').toLowerCase().includes(progSearch.toLowerCase())
+                ).map(p => (
                 <div
                   key={p.id}
-                  className="px-3 py-2 text-sm hover:bg-base-200 cursor-pointer"
+                  className="px-3 py-2 hover:bg-base-200 cursor-pointer"
                   onMouseDown={() => { setSelProgram(String(p.id)); setProgSearch(p.name); setShowProgDropdown(false); }}
                 >
-                  {p.name}
+                  <div className="text-sm font-medium leading-snug">{p.name}</div>
+                  <div className="flex gap-1 mt-0.5 flex-wrap">
+                    {p.field_name_th && <span className="text-xs text-base-content/50">{p.field_name_th}</span>}
+                    {p.campus && p.campus !== 'วิทยาเขตหลัก' && (
+                      <span className="text-xs text-base-content/40">· 📍{p.campus}</span>
+                    )}
+                    {p.program_type && p.program_type !== 'ภาษาไทย ปกติ' && (
+                      <span className="badge badge-xs badge-info opacity-70">{p.program_type}</span>
+                    )}
+                  </div>
                 </div>
               ))
             }

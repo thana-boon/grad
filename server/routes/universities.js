@@ -5,733 +5,700 @@ const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const XLSX = require('xlsx');
 
-// ─── สร้าง uploads/logos directory ────────────────────────────────────────
+// ─── uploads/logos directory ──────────────────────────────────────────────
 const LOGO_DIR = path.join(__dirname, '../uploads/logos');
 fs.mkdirSync(LOGO_DIR, { recursive: true });
 
-// ─── Multer (disk storage สำหรับ logo) ────────────────────────────────────
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, LOGO_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.png';
-    cb(null, `logo-${Date.now()}${ext}`);
-  },
-});
+// ─── Multer: logo upload (disk) ───────────────────────────────────────────
 const logoUpload = multer({
-  storage,
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, LOGO_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase() || '.png';
+      cb(null, `logo-${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('อนุญาตเฉพาะไฟล์รูปภาพ'));
   },
 }).single('logo');
 
-// ─── Helper: สร้าง table ถ้ายังไม่มี ──────────────────────────────────────
-const ensureTable = async () => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS \`universities\` (
-      \`id\`         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      \`name\`       VARCHAR(255) NOT NULL,
-      \`short_name\` VARCHAR(50)  DEFAULT NULL,
-      \`logo_url\`   TEXT         DEFAULT NULL,
-      \`created_at\` TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+// ─── Multer: Excel import (memory) ───────────────────────────────────────
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/\.(xlsx|xls)$/i.test(file.originalname)) cb(null, true);
+    else cb(new Error('อนุญาตเฉพาะไฟล์ Excel (.xlsx, .xls)'));
+  },
+}).single('file');
+
+// ─── ensureTables ─────────────────────────────────────────────────────────
+const ensureTables = async () => {
+  // Check if universities table has old schema (column 'name' instead of 'name_th')
+  const [cols] = await db.query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'universities'
   `);
-};
+  const colNames = cols.map(c => c.COLUMN_NAME);
 
-// ─── ข้อมูล built-in (fallback ถ้า scrape ไม่ได้) ────────────────────────
-const BUILTIN_UNIVERSITIES = [
-  // มหาวิทยาลัยรัฐ (เก่า)
-  { name: 'จุฬาลงกรณ์มหาวิทยาลัย', short_name: 'จุฬาฯ' },
-  { name: 'มหาวิทยาลัยเกษตรศาสตร์', short_name: 'มก.' },
-  { name: 'มหาวิทยาลัยเชียงใหม่', short_name: 'มช.' },
-  { name: 'มหาวิทยาลัยธรรมศาสตร์', short_name: 'มธ.' },
-  { name: 'มหาวิทยาลัยมหิดล', short_name: 'มม.' },
-  { name: 'มหาวิทยาลัยศิลปากร', short_name: 'มศก.' },
-  { name: 'มหาวิทยาลัยสงขลานครินทร์', short_name: 'มอ.' },
-  { name: 'มหาวิทยาลัยขอนแก่น', short_name: 'มข.' },
-  { name: 'มหาวิทยาลัยบูรพา', short_name: 'มบ.' },
-  { name: 'มหาวิทยาลัยนเรศวร', short_name: 'มน.' },
-  { name: 'มหาวิทยาลัยศรีนครินทรวิโรฒ', short_name: 'มศว' },
-  { name: 'มหาวิทยาลัยรามคำแหง', short_name: 'มร.' },
-  { name: 'มหาวิทยาลัยสุโขทัยธรรมาธิราช', short_name: 'มสธ.' },
-  { name: 'มหาวิทยาลัยแม่ฟ้าหลวง', short_name: 'มฟล.' },
-  { name: 'มหาวิทยาลัยวลัยลักษณ์', short_name: 'มวล.' },
-  { name: 'มหาวิทยาลัยแม่โจ้', short_name: 'มจ.' },
-  { name: 'มหาวิทยาลัยอุบลราชธานี', short_name: 'มอบ.' },
-  { name: 'มหาวิทยาลัยมหาสารคาม', short_name: 'มมส.' },
-  { name: 'มหาวิทยาลัยทักษิณ', short_name: 'มทษ.' },
-  { name: 'มหาวิทยาลัยพะเยา', short_name: 'มพ.' },
-  { name: 'มหาวิทยาลัยนครพนม', short_name: 'มนพ.' },
-  { name: 'มหาวิทยาลัยกาฬสินธุ์', short_name: 'มกส.' },
-  { name: 'มหาวิทยาลัยนราธิวาสราชนครินทร์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏกรุงเทพ', short_name: 'มรก.' },
-  // มจพ. / มจธ. / สจล.
-  { name: 'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าธนบุรี', short_name: 'มจธ.' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ', short_name: 'มจพ.' },
-  { name: 'สถาบันเทคโนโลยีพระจอมเกล้าเจ้าคุณทหารลาดกระบัง', short_name: 'สจล.' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีสุรนารี', short_name: 'มทส.' },
-  { name: 'สถาบันเทคโนโลยีปทุมวัน', short_name: 'สทป.' },
-  // มหาวิทยาลัยราชภัฏ
-  { name: 'มหาวิทยาลัยราชภัฏเชียงใหม่', short_name: 'มรชม.' },
-  { name: 'มหาวิทยาลัยราชภัฏเชียงราย', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏลำปาง', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏอุตรดิตถ์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏพิบูลสงคราม', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏนครสวรรค์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏวไลยอลงกรณ์ ในพระบรมราชูปถัมภ์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏเทพสตรี', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏจันทรเกษม', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏสวนสุนันทา', short_name: 'มรสส.' },
-  { name: 'มหาวิทยาลัยราชภัฏบ้านสมเด็จเจ้าพระยา', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏพระนคร', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏราชนครินทร์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏรำไพพรรณี', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏนครราชสีมา', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏบุรีรัมย์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏสุรินทร์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏศรีสะเกษ', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏอุดรธานี', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏเลย', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏสกลนคร', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏมหาสารคาม', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏร้อยเอ็ด', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏกาฬสินธุ์', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏอุบลราชธานี', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏชัยภูมิ', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏสุราษฎร์ธานี', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏนครศรีธรรมราช', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏภูเก็ต', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏสงขลา', short_name: null },
-  { name: 'มหาวิทยาลัยราชภัฏยะลา', short_name: null },
-  // มหาวิทยาลัยราชมงคล
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลธัญบุรี', short_name: 'มทร.ธัญบุรี' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลกรุงเทพ', short_name: 'มทร.กรุงเทพ' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลตะวันออก', short_name: 'มทร.ตะวันออก' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลพระนคร', short_name: 'มทร.พระนคร' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลรัตนโกสินทร์', short_name: 'มทร.รัตนโกสินทร์' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลล้านนา', short_name: 'มทร.ล้านนา' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลศรีวิชัย', short_name: 'มทร.ศรีวิชัย' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลสุวรรณภูมิ', short_name: 'มทร.สุวรรณภูมิ' },
-  { name: 'มหาวิทยาลัยเทคโนโลยีราชมงคลอีสาน', short_name: 'มทร.อีสาน' },
-  // เอกชน
-  { name: 'มหาวิทยาลัยรังสิต', short_name: 'มรส.' },
-  { name: 'มหาวิทยาลัยอัสสัมชัญ', short_name: 'ABAC' },
-  { name: 'มหาวิทยาลัยกรุงเทพ', short_name: 'มกท.' },
-  { name: 'มหาวิทยาลัยหอการค้าไทย', short_name: 'มหอการค้า' },
-  { name: 'มหาวิทยาลัยธุรกิจบัณฑิตย์', short_name: 'มธบ.' },
-  { name: 'มหาวิทยาลัยเกษมบัณฑิต', short_name: null },
-  { name: 'มหาวิทยาลัยสยาม', short_name: null },
-  { name: 'มหาวิทยาลัยนานาชาติเอเชีย-แปซิฟิก', short_name: 'AIU' },
-  { name: 'มหาวิทยาลัยพายัพ', short_name: null },
-  { name: 'มหาวิทยาลัยนอร์ท-เชียงใหม่', short_name: null },
-  { name: 'มหาวิทยาลัยภาคกลาง', short_name: null },
-  { name: 'มหาวิทยาลัยอีสเทิร์นเอเชีย', short_name: 'EAU' },
-  { name: 'มหาวิทยาลัยเวสเทิร์น', short_name: null },
-  { name: 'มหาวิทยาลัยนานาชาติแสตมฟอร์ด', short_name: 'SIU' },
-  { name: 'มหาวิทยาลัยกรุงเทพธนบุรี', short_name: null },
-  { name: 'มหาวิทยาลัยราชพฤกษ์', short_name: null },
-  { name: 'มหาวิทยาลัยเจ้าพระยา', short_name: null },
-  { name: 'มหาวิทยาลัยศรีปทุม', short_name: 'มศป.' },
-  // สถาบัน
-  { name: 'สถาบันบัณฑิตพัฒนบริหารศาสตร์', short_name: 'นิด้า' },
-  { name: 'สถาบันเทคโนโลยีไทย-ญี่ปุ่น', short_name: 'TNI' },
-  { name: 'สถาบันการพยาบาลศรีสวรินทิรา สภากาชาดไทย', short_name: null },
-  { name: 'วิทยาลัยแพทยศาสตร์พระมงกุฎเกล้า', short_name: 'วพม.' },
-];
-
-// ─── Helper: parse HTML จาก Wikipedia ────────────────────────────────────
-const isUniName = (t) =>
-  (t.startsWith('มหาวิทยาลัย') || t.startsWith('สถาบัน') || t.startsWith('วิทยาลัย')) &&
-  t.length > 5;
-
-const parseWikipediaHTML = (html) => {
-  const $ = cheerio.load(html);
-  const results = new Map();
-
-  $('table.wikitable').each((_ti, table) => {
-    $(table)
-      .find('tr')
-      .each((ri, row) => {
-        if (ri === 0) return;
-        const cells = $(row).find('td');
-        if (!cells.length) return;
-
-        let uniName = '';
-        let uniAbbr = '';
-
-        // หาชื่อมหาวิทยาลัยในทุก cell
-        cells.each((_ci, cell) => {
-          const t = $(cell).text().replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
-          if (!uniName && isUniName(t)) uniName = t;
-        });
-
-        // หาชื่อย่อ (text สั้น ไม่ใช่ชื่อเต็ม ไม่ใช่ link)
-        if (uniName) {
-          cells.each((_ci, cell) => {
-            const t = $(cell).text().replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
-            if (!uniAbbr && t !== uniName && t.length > 0 && t.length <= 20 && !isUniName(t) && !/^https?/.test(t)) {
-              uniAbbr = t;
-            }
-          });
-        }
-
-        if (uniName && !results.has(uniName)) results.set(uniName, uniAbbr || null);
-      });
-  });
-
-  return [...results.entries()].map(([name, short_name]) => ({ name, short_name }));
-};
-
-// ─── Source 1: Wikipedia JSON API ─────────────────────────────────────────
-const scrapeWikipediaAPI = async () => {
-  const params = new URLSearchParams({
-    action: 'parse',
-    page: 'รายชื่อมหาวิทยาลัยในประเทศไทย',
-    format: 'json',
-    prop: 'text',
-    disablelimitreport: '1',
-    redirects: '1',
-  });
-  const { data } = await axios.get(
-    `https://th.wikipedia.org/w/api.php?${params.toString()}`,
-    {
-      timeout: 25000,
-      headers: {
-        'User-Agent': 'GradTrack/1.0 (Educational; school management system)',
-        Accept: 'application/json',
-      },
+  if (colNames.length > 0 && colNames.includes('name') && !colNames.includes('name_th')) {
+    // Old schema — migrate columns
+    await db.query('ALTER TABLE `universities` CHANGE COLUMN `name` `name_th` VARCHAR(255) NOT NULL');
+    if (!colNames.includes('name_en'))         await db.query('ALTER TABLE `universities` ADD COLUMN `name_en` VARCHAR(255) DEFAULT NULL AFTER `name_th`');
+    if (!colNames.includes('short_name'))       await db.query('ALTER TABLE `universities` ADD COLUMN `short_name` VARCHAR(50) DEFAULT NULL AFTER `name_en`');
+    if (!colNames.includes('university_type'))  await db.query('ALTER TABLE `universities` ADD COLUMN `university_type` VARCHAR(50) DEFAULT NULL AFTER `short_name`');
+    if (!colNames.includes('updated_at'))       await db.query('ALTER TABLE `universities` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+    // Add unique key if missing
+    const [keys] = await db.query(`SHOW INDEX FROM \`universities\` WHERE Key_name = 'uk_name_th'`);
+    if (!keys.length) {
+      await db.query('ALTER TABLE `universities` ADD UNIQUE KEY `uk_name_th` (`name_th`)').catch(() => {});
     }
-  );
-  if (data.error) throw new Error(`Wikipedia API error: ${data.error.info}`);
-  const html = data?.parse?.text?.['*'];
-  if (!html) throw new Error('ไม่ได้รับ HTML จาก Wikipedia API');
-  return parseWikipediaHTML(html);
-};
-
-// ─── Source 2: Wikipedia direct URL ───────────────────────────────────────
-const scrapeWikipediaDirect = async () => {
-  const { data: html } = await axios.get(
-    'https://th.wikipedia.org/wiki/รายชื่อมหาวิทยาลัยในประเทศไทย',
-    {
-      timeout: 25000,
-      headers: {
-        'User-Agent': 'GradTrack/1.0 (Educational; school management system)',
-        'Accept-Language': 'th,en;q=0.9',
-        Accept: 'text/html',
-      },
-    }
-  );
-  return parseWikipediaHTML(html);
-};
-
-// ─── Helper: ลอง scrape หลายแหล่ง ────────────────────────────────────────
-const scrapeThaiUniversities = async () => {
-  const errors = [];
-
-  // Source 1: Wikipedia JSON API
-  try {
-    const results = await scrapeWikipediaAPI();
-    if (results.length >= 10) return { results, source: 'Wikipedia (JSON API)' };
-    errors.push(`Wikipedia JSON API: พบเพียง ${results.length} รายการ`);
-  } catch (e) {
-    errors.push(`Wikipedia JSON API: ${e.message}`);
   }
 
-  // Source 2: Wikipedia direct
-  try {
-    const results = await scrapeWikipediaDirect();
-    if (results.length >= 10) return { results, source: 'Wikipedia (direct)' };
-    errors.push(`Wikipedia direct: พบเพียง ${results.length} รายการ`);
-  } catch (e) {
-    errors.push(`Wikipedia direct: ${e.message}`);
+  // Migrate faculties if old schema
+  const [fcols] = await db.query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'faculties'
+  `);
+  const fColNames = fcols.map(c => c.COLUMN_NAME);
+  if (fColNames.length > 0 && fColNames.includes('name') && !fColNames.includes('name_th')) {
+    await db.query('ALTER TABLE `faculties` CHANGE COLUMN `name` `name_th` VARCHAR(255) NOT NULL');
+    if (!fColNames.includes('name_en')) await db.query('ALTER TABLE `faculties` ADD COLUMN `name_en` VARCHAR(255) DEFAULT NULL AFTER `name_th`');
+    const [fkeys] = await db.query(`SHOW INDEX FROM \`faculties\` WHERE Key_name = 'uk_uni_fac'`);
+    if (!fkeys.length) {
+      await db.query('ALTER TABLE `faculties` ADD UNIQUE KEY `uk_uni_fac` (`university_id`, `name_th`)').catch(() => {});
+    }
   }
 
-  // Source 3: Built-in list
-  console.warn('[universities] ใช้ built-in list เนื่องจาก scraping ล้มเหลว:', errors);
-  return { results: BUILTIN_UNIVERSITIES, source: 'built-in list', warnings: errors };
+  // Create tables if not exist (new schema)
+  if (colNames.length === 0) {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS \`universities\` (
+        \`id\`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        \`name_th\`         VARCHAR(255) NOT NULL,
+        \`name_en\`         VARCHAR(255) DEFAULT NULL,
+        \`short_name\`      VARCHAR(50)  DEFAULT NULL,
+        \`university_type\` VARCHAR(50)  DEFAULT NULL,
+        \`logo_url\`        TEXT         DEFAULT NULL,
+        \`created_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY \`uk_name_th\` (\`name_th\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  }
+  if (fColNames.length === 0) {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS \`faculties\` (
+        \`id\`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        \`university_id\` INT UNSIGNED NOT NULL,
+        \`name_th\`       VARCHAR(255) NOT NULL,
+        \`name_en\`       VARCHAR(255) DEFAULT NULL,
+        \`created_at\`    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY \`uk_uni_fac\` (\`university_id\`, \`name_th\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  }
+
+  // Programs table — check and create/migrate
+  const [pcols] = await db.query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'programs'
+  `);
+  const pColNames = pcols.map(c => c.COLUMN_NAME);
+  if (pColNames.length > 0 && pColNames.includes('name') && !pColNames.includes('program_name_th')) {
+    await db.query('ALTER TABLE `programs` CHANGE COLUMN `name` `program_name_th` VARCHAR(500) NOT NULL');
+    if (!pColNames.includes('program_name_en')) await db.query('ALTER TABLE `programs` ADD COLUMN `program_name_en` VARCHAR(500) DEFAULT NULL AFTER `program_name_th`');
+    if (!pColNames.includes('campus'))          await db.query('ALTER TABLE `programs` ADD COLUMN `campus` VARCHAR(100) DEFAULT NULL AFTER `faculty_id`');
+    if (!pColNames.includes('group_field'))     await db.query('ALTER TABLE `programs` ADD COLUMN `group_field` VARCHAR(100) DEFAULT NULL AFTER `campus`');
+    if (!pColNames.includes('field_name_th'))   await db.query('ALTER TABLE `programs` ADD COLUMN `field_name_th` VARCHAR(255) DEFAULT NULL AFTER `group_field`');
+    if (!pColNames.includes('field_name_en'))   await db.query('ALTER TABLE `programs` ADD COLUMN `field_name_en` VARCHAR(255) DEFAULT NULL AFTER `field_name_th`');
+    if (!pColNames.includes('program_type'))    await db.query('ALTER TABLE `programs` ADD COLUMN `program_type` VARCHAR(50) DEFAULT NULL AFTER `program_name_en`');
+  }
+  // Drop any old unique key on programs (uk_faculty_program) — programs can have same name with diff campus/type
+  if (pColNames.length > 0) {
+    const [pkeys] = await db.query(`SHOW INDEX FROM \`programs\` WHERE Key_name = 'uk_faculty_program'`);
+    if (pkeys.length) await db.query('ALTER TABLE `programs` DROP INDEX `uk_faculty_program`');
+    // Ensure program_type column exists (even on already-migrated tables)
+    if (!pColNames.includes('program_type')) {
+      await db.query('ALTER TABLE `programs` ADD COLUMN `program_type` VARCHAR(50) DEFAULT NULL');
+    }
+  }
+  if (pColNames.length === 0) {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS \`programs\` (
+        \`id\`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        \`faculty_id\`      INT UNSIGNED NOT NULL,
+        \`campus\`          VARCHAR(100) DEFAULT NULL,
+        \`group_field\`     VARCHAR(100) DEFAULT NULL,
+        \`field_name_th\`   VARCHAR(255) DEFAULT NULL,
+        \`field_name_en\`   VARCHAR(255) DEFAULT NULL,
+        \`program_name_th\` VARCHAR(500) NOT NULL,
+        \`program_name_en\` VARCHAR(500) DEFAULT NULL,
+        \`program_type\`    VARCHAR(50)  DEFAULT NULL,
+        \`created_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+  }
 };
 
-// ─── Routes ───────────────────────────────────────────────────────────────
+// ─── GET /api/universities ────────────────────────────────────────────────
+// เรียงตามประเภท (ทปอ. → ราชภัฏ → ราชมงคล → เอกชน → อื่นๆ) แล้วตามชื่อ
+const TYPE_ORDER = `CASE university_type WHEN 'ทปอ.' THEN 1 WHEN 'ราชภัฏ' THEN 2 WHEN 'ราชมงคล' THEN 3 WHEN 'เอกชน' THEN 4 ELSE 5 END, name_th`;
 
-// GET  /api/universities
-router.get('/', verifyToken, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    await ensureTable();
-    const [rows] = await db.query('SELECT * FROM `universities` ORDER BY `name` ASC');
+    await ensureTables();
+    const { search } = req.query;
+    let rows;
+    if (search) {
+      const q = `%${search}%`;
+      [rows] = await db.query(
+        `SELECT id, name_th AS name, name_en, short_name, university_type, logo_url
+         FROM \`universities\`
+         WHERE name_th LIKE ? OR name_en LIKE ? OR short_name LIKE ?
+         ORDER BY ${TYPE_ORDER}`,
+        [q, q, q]
+      );
+    } else {
+      [rows] = await db.query(
+        `SELECT id, name_th AS name, name_en, short_name, university_type, logo_url
+         FROM \`universities\`
+         ORDER BY ${TYPE_ORDER}`
+      );
+    }
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ message: 'โหลดข้อมูลไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: err.message });
   }
 });
 
-// POST /api/universities/sync  ← ต้องอยู่ก่อน /:id
-router.post('/sync', verifyToken, adminOnly, async (req, res) => {
-  try {
-    await ensureTable();
-    const { results: scraped, source, warnings } = await scrapeThaiUniversities();
-
-    let added = 0;
-    let skipped = 0;
-    for (const u of scraped) {
-      const [existing] = await db.query(
-        'SELECT id FROM `universities` WHERE `name` = ?',
-        [u.name]
-      );
-      if (existing.length === 0) {
-        await db.query(
-          'INSERT INTO `universities` (`name`, `short_name`) VALUES (?, ?)',
-          [u.name, u.short_name || null]
-        );
-        added++;
-      } else {
-        skipped++;
-      }
-    }
-
-    res.json({
-      message: `Sync สำเร็จ (แหล่งข้อมูล: ${source})`,
-      total: scraped.length,
-      added,
-      skipped,
-      source,
-      warnings: warnings || [],
-    });
-  } catch (err) {
-    res.status(500).json({ message: `Sync ไม่สำเร็จ: ${err.message}` });
-  }
-});
-
-// ─── Domain mapping สำหรับ Clearbit logo ─────────────────────────────────
-const UNI_DOMAINS = {
-  'จุฬาลงกรณ์มหาวิทยาลัย': 'chula.ac.th',
-  'มหาวิทยาลัยเกษตรศาสตร์': 'ku.ac.th',
-  'มหาวิทยาลัยเชียงใหม่': 'cmu.ac.th',
-  'มหาวิทยาลัยธรรมศาสตร์': 'tu.ac.th',
-  'มหาวิทยาลัยมหิดล': 'mahidol.ac.th',
-  'มหาวิทยาลัยศิลปากร': 'su.ac.th',
-  'มหาวิทยาลัยสงขลานครินทร์': 'psu.ac.th',
-  'มหาวิทยาลัยขอนแก่น': 'kku.ac.th',
-  'มหาวิทยาลัยบูรพา': 'buu.ac.th',
-  'มหาวิทยาลัยนเรศวร': 'nu.ac.th',
-  'มหาวิทยาลัยศรีนครินทรวิโรฒ': 'swu.ac.th',
-  'มหาวิทยาลัยรามคำแหง': 'ru.ac.th',
-  'มหาวิทยาลัยสุโขทัยธรรมาธิราช': 'stou.ac.th',
-  'มหาวิทยาลัยแม่ฟ้าหลวง': 'mfu.ac.th',
-  'มหาวิทยาลัยวลัยลักษณ์': 'wu.ac.th',
-  'มหาวิทยาลัยแม่โจ้': 'mju.ac.th',
-  'มหาวิทยาลัยอุบลราชธานี': 'ubu.ac.th',
-  'มหาวิทยาลัยมหาสารคาม': 'msu.ac.th',
-  'มหาวิทยาลัยทักษิณ': 'tsu.ac.th',
-  'มหาวิทยาลัยพะเยา': 'up.ac.th',
-  'มหาวิทยาลัยนครพนม': 'npu.ac.th',
-  'มหาวิทยาลัยกาฬสินธุ์': 'ksu.ac.th',
-  'มหาวิทยาลัยนราธิวาสราชนครินทร์': 'pnu.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าธนบุรี': 'kmutt.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ': 'kmutnb.ac.th',
-  'สถาบันเทคโนโลยีพระจอมเกล้าเจ้าคุณทหารลาดกระบัง': 'kmitl.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีสุรนารี': 'sut.ac.th',
-  'สถาบันเทคโนโลยีปทุมวัน': 'pit.ac.th',
-  'สถาบันบัณฑิตพัฒนบริหารศาสตร์': 'nida.ac.th',
-  'สถาบันเทคโนโลยีไทย-ญี่ปุ่น': 'tni.ac.th',
-  'วิทยาลัยแพทยศาสตร์พระมงกุฎเกล้า': 'pcm.ac.th',
-  // ราชภัฏ
-  'มหาวิทยาลัยราชภัฏกรุงเทพ': 'rbg.ac.th',
-  'มหาวิทยาลัยราชภัฏเชียงใหม่': 'cmru.ac.th',
-  'มหาวิทยาลัยราชภัฏเชียงราย': 'crru.ac.th',
-  'มหาวิทยาลัยราชภัฏลำปาง': 'lpru.ac.th',
-  'มหาวิทยาลัยราชภัฏอุตรดิตถ์': 'uru.ac.th',
-  'มหาวิทยาลัยราชภัฏพิบูลสงคราม': 'psru.ac.th',
-  'มหาวิทยาลัยราชภัฏนครสวรรค์': 'nsru.ac.th',
-  'มหาวิทยาลัยราชภัฏวไลยอลงกรณ์ ในพระบรมราชูปถัมภ์': 'vru.ac.th',
-  'มหาวิทยาลัยราชภัฏเทพสตรี': 'tru.ac.th',
-  'มหาวิทยาลัยราชภัฏจันทรเกษม': 'chandra.ac.th',
-  'มหาวิทยาลัยราชภัฏสวนสุนันทา': 'ssru.ac.th',
-  'มหาวิทยาลัยราชภัฏบ้านสมเด็จเจ้าพระยา': 'bsru.ac.th',
-  'มหาวิทยาลัยราชภัฏพระนคร': 'pnru.ac.th',
-  'มหาวิทยาลัยราชภัฏราชนครินทร์': 'rru.ac.th',
-  'มหาวิทยาลัยราชภัฏรำไพพรรณี': 'rbru.ac.th',
-  'มหาวิทยาลัยราชภัฏนครราชสีมา': 'nrru.ac.th',
-  'มหาวิทยาลัยราชภัฏบุรีรัมย์': 'bru.ac.th',
-  'มหาวิทยาลัยราชภัฏสุรินทร์': 'srru.ac.th',
-  'มหาวิทยาลัยราชภัฏศรีสะเกษ': 'sskru.ac.th',
-  'มหาวิทยาลัยราชภัฏอุดรธานี': 'udru.ac.th',
-  'มหาวิทยาลัยราชภัฏเลย': 'lru.ac.th',
-  'มหาวิทยาลัยราชภัฏสกลนคร': 'snru.ac.th',
-  'มหาวิทยาลัยราชภัฏมหาสารคาม': 'rmu.ac.th',
-  'มหาวิทยาลัยราชภัฏร้อยเอ็ด': 'reru.ac.th',
-  'มหาวิทยาลัยราชภัฏกาฬสินธุ์': 'ksr.ac.th',
-  'มหาวิทยาลัยราชภัฏอุบลราชธานี': 'ubru.ac.th',
-  'มหาวิทยาลัยราชภัฏชัยภูมิ': 'cpru.ac.th',
-  'มหาวิทยาลัยราชภัฏสุราษฎร์ธานี': 'sru.ac.th',
-  'มหาวิทยาลัยราชภัฏนครศรีธรรมราช': 'nstru.ac.th',
-  'มหาวิทยาลัยราชภัฏภูเก็ต': 'pkru.ac.th',
-  'มหาวิทยาลัยราชภัฏสงขลา': 'skru.ac.th',
-  'มหาวิทยาลัยราชภัฏยะลา': 'yru.ac.th',
-  // ราชมงคล
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลธัญบุรี': 'rmutt.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลกรุงเทพ': 'rmutk.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลตะวันออก': 'rmutto.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลพระนคร': 'rmutp.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลรัตนโกสินทร์': 'rmutr.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลล้านนา': 'rmutl.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลศรีวิชัย': 'rmutsv.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลสุวรรณภูมิ': 'rmutsb.ac.th',
-  'มหาวิทยาลัยเทคโนโลยีราชมงคลอีสาน': 'rmuti.ac.th',
-  // เอกชน
-  'มหาวิทยาลัยรังสิต': 'rsu.ac.th',
-  'มหาวิทยาลัยอัสสัมชัญ': 'au.ac.th',
-  'มหาวิทยาลัยกรุงเทพ': 'bu.ac.th',
-  'มหาวิทยาลัยหอการค้าไทย': 'utcc.ac.th',
-  'มหาวิทยาลัยธุรกิจบัณฑิตย์': 'dpu.ac.th',
-  'มหาวิทยาลัยเกษมบัณฑิต': 'kbu.ac.th',
-  'มหาวิทยาลัยสยาม': 'siam.edu',
-  'มหาวิทยาลัยอีสเทิร์นเอเชีย': 'eau.ac.th',
-  'มหาวิทยาลัยเวสเทิร์น': 'western.ac.th',
-  'มหาวิทยาลัยนานาชาติแสตมฟอร์ด': 'stamford.edu',
-  'มหาวิทยาลัยกรุงเทพธนบุรี': 'bkkthon.ac.th',
-  'มหาวิทยาลัยราชพฤกษ์': 'rpu.ac.th',
-  'มหาวิทยาลัยเจ้าพระยา': 'cpu.ac.th',
-  'มหาวิทยาลัยศรีปทุม': 'spu.ac.th',
-  'มหาวิทยาลัยนานาชาติเอเชีย-แปซิฟิก': 'apiu.edu',
-  'มหาวิทยาลัยพายัพ': 'payap.ac.th',
-  'มหาวิทยาลัยนอร์ท-เชียงใหม่': 'northcm.ac.th',
-};
-
-// ─── Helper: ดาวน์โหลดรูป → Buffer ─────────────────────────────────────────
-const downloadImage = async (url, referer) => {
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  };
-  if (referer) headers['Referer'] = referer;
-  const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000, headers });
-  const ct = (res.headers['content-type'] || '').split(';')[0].trim();
-  if (!ct.startsWith('image/')) throw new Error(`Not image: ${ct}`);
-  return { data: Buffer.from(res.data), ct };
-};
-
-const CT_TO_EXT = {
-  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-  'image/svg+xml': '.svg', 'image/webp': '.webp', 'image/x-icon': '.ico',
-  'image/vnd.microsoft.icon': '.ico',
-};
-const getExt = (ct, fallbackUrl = '') =>
-  CT_TO_EXT[ct] || path.extname(fallbackUrl.split('?')[0]) || '.png';
-
-const WP_HEADERS = {
-  'User-Agent': 'GradTrack/1.0 (Educational)',
-  Accept: 'application/json',
-};
-
-// ─── Helper: บันทึกไฟล์ + อัปเดต DB ─────────────────────────────────────────
-const saveLogoFile = async (uniId, imgBuffer, ct, source) => {
-  const ext = getExt(ct);
-  const filename = `logo-${source}-${uniId}-${Date.now()}${ext}`;
-  fs.writeFileSync(path.join(LOGO_DIR, filename), imgBuffer);
-  await db.query('UPDATE `universities` SET logo_url = ? WHERE id = ?', [`/uploads/logos/${filename}`, uniId]);
-};
-
-// ─── Source 1: Scrape เว็บมหาวิทยาลัยโดยตรง ────────────────────────────────
-const fetchWebsiteLogo = async (domain) => {
-  for (const baseUrl of [`https://www.${domain}`, `https://${domain}`]) {
-    try {
-      const { data: html } = await axios.get(baseUrl, {
-        timeout: 12000,
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'text/html,application/xhtml+xml',
-          'Accept-Language': 'th,en;q=0.9',
-        },
-      });
-      const $ = cheerio.load(html);
-      const candidates = []; // { url, priority }
-
-      // apple-touch-icon (มักเป็น logo จริง)
-      $('link[rel*="apple-touch-icon"]').each((_, el) => {
-        const href = $(el).attr('href');
-        if (href) candidates.push({ url: href, priority: 1 });
-      });
-
-      // og:image
-      const ogImg = $('meta[property="og:image"]').attr('content');
-      if (ogImg) candidates.push({ url: ogImg, priority: 2 });
-
-      // img ที่มี logo ใน src/alt/class/id
-      $('img').each((_, el) => {
-        const src = $(el).attr('src') || '';
-        if (!src || src.startsWith('data:')) return;
-        const alt = ($(el).attr('alt') || '').toLowerCase();
-        const cls = ($(el).attr('class') || '').toLowerCase();
-        const id = ($(el).attr('id') || '').toLowerCase();
-        if (
-          src.toLowerCase().includes('logo') ||
-          alt.includes('logo') ||
-          cls.includes('logo') ||
-          id.includes('logo')
-        ) {
-          candidates.push({ url: src, priority: 3 });
-        }
-      });
-
-      candidates.sort((a, b) => a.priority - b.priority);
-
-      for (const c of candidates) {
-        let url = c.url.trim();
-        if (!url) continue;
-        if (url.startsWith('//')) url = 'https:' + url;
-        else if (url.startsWith('/')) url = baseUrl + url;
-        else if (!url.startsWith('http')) url = `${baseUrl}/${url}`;
-        try {
-          const img = await downloadImage(url, baseUrl);
-          if (img.data.length > 500) return img;
-        } catch { }
-      }
-
-      // ลอง common paths
-      for (const p of ['/images/logo.png', '/img/logo.png', '/assets/logo.png', '/images/logo.jpg', '/img/logo.jpg', '/assets/images/logo.png']) {
-        try {
-          const img = await downloadImage(baseUrl + p, baseUrl);
-          if (img.data.length > 500) return img;
-        } catch { }
-      }
-    } catch { }
-  }
-  return null;
-};
-
-// ─── Source 2: Google S2 Favicon (ทำงานได้แทบทุก domain) ──────────────────
-const fetchGoogleFavicon = async (domain) => {
-  const url = `https://www.google.com/s2/favicons?sz=256&domain_url=https://${domain}`;
-  const img = await downloadImage(url);
-  if (img.data.length < 500) throw new Error('favicon too small (default icon)');
-  return img;
-};
-
-// ─── Source 3: Wikipedia — กรองหา logo/seal/emblem image โดยเฉพาะ ──────────
-const fetchWikipediaLogoImage = async (name) => {
-  // หา page ภาษาไทย
-  const { data: srData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', list: 'search', srsearch: name, srlimit: 1, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const pageTitle = srData?.query?.search?.[0]?.title;
-  if (!pageTitle) return null;
-
-  // ดึงรายการ images ทั้งหมดของ page
-  const { data: imData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', titles: pageTitle, prop: 'images', imlimit: 50, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const images = Object.values(imData?.query?.pages || {})[0]?.images;
-  if (!images?.length) return null;
-
-  // กรองเฉพาะ logo/seal/emblem/badge
-  const logoFiles = images.filter(({ title }) => {
-    const t = title.toLowerCase();
-    return t.includes('logo') || t.includes('seal') || t.includes('emblem') || t.includes('badge');
-  });
-  if (!logoFiles.length) return null;
-
-  // ดึง URL ของไฟล์แรกที่พบ
-  const { data: infoData } = await axios.get('https://th.wikipedia.org/w/api.php', {
-    params: { action: 'query', titles: logoFiles[0].title, prop: 'imageinfo', iiprop: 'url', iiurlwidth: 256, format: 'json' },
-    timeout: 10000, headers: WP_HEADERS,
-  });
-  const imgUrl = Object.values(infoData?.query?.pages || {})[0]?.imageinfo?.[0]?.thumburl;
-  if (!imgUrl) return null;
-  return downloadImage(imgUrl, 'https://th.wikipedia.org');
-};
-
-// ─── Source 4: Wikimedia Commons — ค้นหา logo file ──────────────────────────
-const fetchCommonsLogo = async (name) => {
-  for (const q of [`${name} logo`, `${name} seal`, `${name} emblem`]) {
-    try {
-      const { data: srData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
-        params: { action: 'query', list: 'search', srsearch: q, srnamespace: 6, srlimit: 5, format: 'json' },
-        timeout: 10000, headers: WP_HEADERS,
-      });
-      const files = srData?.query?.search || [];
-      for (const file of files) {
-        const ft = file.title.toLowerCase();
-        if (!ft.includes('logo') && !ft.includes('seal') && !ft.includes('emblem')) continue;
-        try {
-          const { data: infoData } = await axios.get('https://commons.wikimedia.org/w/api.php', {
-            params: { action: 'query', prop: 'imageinfo', titles: file.title, iiprop: 'url', iiurlwidth: 256, format: 'json' },
-            timeout: 10000, headers: WP_HEADERS,
-          });
-          const info = Object.values(infoData?.query?.pages || {})[0]?.imageinfo?.[0];
-          const imgUrl = info?.thumburl || info?.url;
-          if (!imgUrl) continue;
-          const img = await downloadImage(imgUrl, 'https://commons.wikimedia.org');
-          if (img.data.length > 500) return img;
-        } catch { }
-      }
-    } catch { }
-  }
-  return null;
-};
-
-// POST /api/universities/sync-logos  ← ต้องอยู่ก่อน /:id
-router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
-  try {
-    await ensureTable();
-    const [unis] = await db.query(
-      'SELECT id, name FROM `universities` WHERE logo_url IS NULL OR logo_url = "" ORDER BY id ASC'
-    );
-    if (unis.length === 0) {
-      return res.json({ message: 'ทุก university มี logo แล้ว', updated: 0, failed: 0, total: 0 });
-    }
-
-    let updated = 0;
-    let failed = 0;
-    const failedNames = [];
-    const sourceStats = { website: 0, favicon: 0, wikipedia: 0, commons: 0 };
-
-    for (const u of unis) {
-      let saved = false;
-      const domain = UNI_DOMAINS[u.name];
-
-      // Source 1: Scrape เว็บไซต์มหาวิทยาลัยโดยตรง
-      if (domain && !saved) {
-        try {
-          const img = await fetchWebsiteLogo(domain);
-          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'web'); sourceStats.website++; saved = true; }
-        } catch { }
-      }
-
-      // Source 2: Google favicon (sz=256)
-      if (domain && !saved) {
-        try {
-          const img = await fetchGoogleFavicon(domain);
-          await saveLogoFile(u.id, img.data, img.ct, 'fav');
-          sourceStats.favicon++;
-          saved = true;
-        } catch { }
-      }
-
-      // Source 3: Wikipedia — เจาะหา logo image โดยเฉพาะ
-      if (!saved) {
-        try {
-          const img = await fetchWikipediaLogoImage(u.name);
-          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'wiki'); sourceStats.wikipedia++; saved = true; }
-        } catch { }
-      }
-
-      // Source 4: Wikimedia Commons
-      if (!saved) {
-        try {
-          const img = await fetchCommonsLogo(u.name);
-          if (img) { await saveLogoFile(u.id, img.data, img.ct, 'commons'); sourceStats.commons++; saved = true; }
-        } catch { }
-      }
-
-      if (saved) updated++;
-      else { failed++; failedNames.push(u.name); }
-
-      await new Promise((r) => setTimeout(r, 300));
-    }
-
-    res.json({
-      message: 'Sync logo สำเร็จ',
-      total: unis.length,
-      updated,
-      failed,
-      sourceStats,
-      failedNames: failedNames.slice(0, 30),
-    });
-  } catch (err) {
-    res.status(500).json({ message: `Sync logo ไม่สำเร็จ: ${err.message}` });
-  }
-});
-
-// POST /api/universities  (สร้างใหม่)
+// ─── POST /api/universities (manual add) ──────────────────────────────────
 router.post('/', verifyToken, adminOnly, (req, res) => {
   logoUpload(req, res, async (err) => {
     if (err) return res.status(400).json({ message: err.message });
-    const { name, short_name, logo_url } = req.body;
+    const { name, short_name, name_en, university_type } = req.body;
     if (!name?.trim()) return res.status(400).json({ message: 'กรุณากรอกชื่อมหาวิทยาลัย' });
-
-    const finalLogo = req.file ? `/uploads/logos/${req.file.filename}` : (logo_url || null);
     try {
-      await ensureTable();
-      const [result] = await db.query(
-        'INSERT INTO `universities` (`name`, `short_name`, `logo_url`) VALUES (?, ?, ?)',
-        [name.trim(), short_name?.trim() || null, finalLogo]
+      await ensureTables();
+      let logo_url = req.body.logo_url?.trim() || null;
+      if (req.file) logo_url = `/uploads/logos/${req.file.filename}`;
+      await db.query(
+        'INSERT INTO `universities` (name_th, name_en, short_name, university_type, logo_url) VALUES (?, ?, ?, ?, ?)',
+        [name.trim(), name_en?.trim() || null, short_name?.trim() || null, university_type?.trim() || null, logo_url]
       );
-      const [rows] = await db.query('SELECT * FROM `universities` WHERE id = ?', [result.insertId]);
-      res.status(201).json(rows[0]);
+      res.status(201).json({ message: 'เพิ่มมหาวิทยาลัยสำเร็จ' });
     } catch (err) {
-      res.status(500).json({ message: 'สร้างไม่สำเร็จ', error: err.message });
+      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'มีชื่อนี้อยู่แล้ว' });
+      res.status(500).json({ message: err.message });
     }
   });
 });
 
-// PUT /api/universities/:id
+// ─── PUT /api/universities/:id ────────────────────────────────────────────
 router.put('/:id', verifyToken, adminOnly, (req, res) => {
   logoUpload(req, res, async (err) => {
     if (err) return res.status(400).json({ message: err.message });
     const { id } = req.params;
-    const { name, short_name, logo_url } = req.body;
+    const { name, short_name, name_en, university_type } = req.body;
     if (!name?.trim()) return res.status(400).json({ message: 'กรุณากรอกชื่อมหาวิทยาลัย' });
-
     try {
-      // ลบไฟล์เก่าถ้ามีการ upload ใหม่
-      if (req.file) {
-        const [existing] = await db.query(
-          'SELECT logo_url FROM `universities` WHERE id = ?',
-          [id]
+      let logo_url = req.body.logo_url?.trim() || null;
+      if (req.file) logo_url = `/uploads/logos/${req.file.filename}`;
+      if (logo_url !== null) {
+        await db.query(
+          'UPDATE `universities` SET name_th=?, name_en=?, short_name=?, university_type=?, logo_url=? WHERE id=?',
+          [name.trim(), name_en?.trim() || null, short_name?.trim() || null, university_type?.trim() || null, logo_url, id]
         );
-        const oldLogo = existing[0]?.logo_url;
-        if (oldLogo?.startsWith('/uploads/')) {
-          const oldPath = path.join(__dirname, '..', oldLogo);
-          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
-        }
+      } else {
+        await db.query(
+          'UPDATE `universities` SET name_th=?, name_en=?, short_name=?, university_type=? WHERE id=?',
+          [name.trim(), name_en?.trim() || null, short_name?.trim() || null, university_type?.trim() || null, id]
+        );
       }
-
-      const finalLogo = req.file
-        ? `/uploads/logos/${req.file.filename}`
-        : logo_url !== undefined
-        ? logo_url || null
-        : undefined;
-
-      const fields = ['`name` = ?', '`short_name` = ?'];
-      const values = [name.trim(), short_name?.trim() || null];
-      if (finalLogo !== undefined) {
-        fields.push('`logo_url` = ?');
-        values.push(finalLogo);
-      }
-      values.push(id);
-
-      await db.query(`UPDATE \`universities\` SET ${fields.join(', ')} WHERE id = ?`, values);
-      const [rows] = await db.query('SELECT * FROM `universities` WHERE id = ?', [id]);
-      res.json(rows[0]);
+      res.json({ message: 'อัปเดตสำเร็จ' });
     } catch (err) {
-      res.status(500).json({ message: 'แก้ไขไม่สำเร็จ', error: err.message });
+      res.status(500).json({ message: err.message });
     }
   });
 });
 
-// DELETE /api/universities/:id
+// ─── DELETE /api/universities/clear-all ─────────────────────────────────
+// ล้างข้อมูลทั้งหมด (universities, faculties, programs) + logo files
+router.delete('/clear-all', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await ensureTables();
+    // ลบ logo files ทั้งหมด
+    if (fs.existsSync(LOGO_DIR)) {
+      for (const f of fs.readdirSync(LOGO_DIR)) {
+        try { fs.unlinkSync(path.join(LOGO_DIR, f)); } catch {}
+      }
+    }
+    // ลบข้อมูลทั้งหมด (order matters: programs → faculties → universities)
+    await db.query('DELETE FROM `programs`');
+    await db.query('DELETE FROM `faculties`');
+    await db.query('DELETE FROM `universities`');
+    // Reset auto-increment
+    await db.query('ALTER TABLE `programs` AUTO_INCREMENT = 1');
+    await db.query('ALTER TABLE `faculties` AUTO_INCREMENT = 1');
+    await db.query('ALTER TABLE `universities` AUTO_INCREMENT = 1');
+    res.json({ message: 'ล้างข้อมูลทั้งหมดสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── DELETE /api/universities/:id ─────────────────────────────────────────
 router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   try {
-    const [existing] = await db.query(
-      'SELECT logo_url FROM `universities` WHERE id = ?',
-      [req.params.id]
-    );
-    const logo = existing[0]?.logo_url;
-    if (logo?.startsWith('/uploads/')) {
-      const filePath = path.join(__dirname, '..', logo);
+    const [rows] = await db.query('SELECT logo_url FROM `universities` WHERE id = ?', [req.params.id]);
+    if (rows.length === 0) return res.status(404).json({ message: 'ไม่พบข้อมูล' });
+    if (rows[0].logo_url?.startsWith('/uploads/')) {
+      const filePath = path.join(__dirname, '..', rows[0].logo_url);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
     await db.query('DELETE FROM `universities` WHERE id = ?', [req.params.id]);
     res.json({ message: 'ลบสำเร็จ' });
   } catch (err) {
-    res.status(500).json({ message: 'ลบไม่สำเร็จ', error: err.message });
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── POST /api/universities/import-excel ─────────────────────────────────
+// ล้างข้อมูลเดิมทั้งหมด แล้ว import จาก Excel
+// columns: university_type_name_th, university_name_th, university_name_en,
+//          campus_name_th, faculty_name_th, faculty_name_en,
+//          group_field_th, field_name_th, field_name_en,
+//          program_name_th, program_name_en, program_type_name_th
+router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
+  excelUpload(req, res, async (uploadErr) => {
+    if (uploadErr) return res.status(400).json({ message: uploadErr.message });
+    if (!req.file) return res.status(400).json({ message: 'กรุณาอัปโหลดไฟล์ Excel' });
+
+    try {
+      await ensureTables();
+
+      // Parse Excel
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws);
+
+      if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ว่างเปล่า' });
+
+      const requiredCols = ['university_name_th', 'faculty_name_th', 'program_name_th'];
+      for (const col of requiredCols) {
+        if (!(col in rows[0])) return res.status(400).json({ message: `ไม่พบคอลัมน์ "${col}" ในไฟล์` });
+      }
+
+      // ── ตรวจสอบสาขาซ้ำใน Excel ก่อน import ─────────────────────────
+      {
+        const seen = new Set();
+        let dupCount = 0;
+        const dupExamples = [];
+        for (const r of rows) {
+          const uniName  = (r.university_name_th  || '').trim();
+          const facName  = (r.faculty_name_th      || '').trim();
+          const progName = (r.program_name_th      || '').trim();
+          const campus   = (r.campus_name_th       || '').trim();
+          const progType = (r.program_type_name_th || '').trim();
+          if (!uniName || !facName || !progName) continue;
+          const key = `${uniName}::${facName}::${campus}::${progName}::${progType}`;
+          if (seen.has(key)) {
+            dupCount++;
+            if (dupExamples.length < 5) dupExamples.push({ university: uniName, faculty: facName, program: progName, campus: campus || '-', type: progType || '-' });
+          } else {
+            seen.add(key);
+          }
+        }
+        if (dupCount > 0) {
+          return res.status(400).json({
+            message: `พบสาขาซ้ำในไฟล์ Excel จำนวน ${dupCount} รายการ — ไม่สามารถ import ได้ กรุณาแก้ไขไฟล์ก่อน`,
+            duplicateCount: dupCount,
+            examples: dupExamples,
+          });
+        }
+      }
+
+      // ล้าง logo files เดิม
+      if (fs.existsSync(LOGO_DIR)) {
+        for (const f of fs.readdirSync(LOGO_DIR)) {
+          fs.unlinkSync(path.join(LOGO_DIR, f));
+        }
+      }
+
+      // ล้าง DB (ลำดับ FK: programs → faculties → universities)
+      await db.query('DELETE FROM `programs`');
+      await db.query('DELETE FROM `faculties`');
+      await db.query('DELETE FROM `universities`');
+      await db.query('ALTER TABLE `programs` AUTO_INCREMENT = 1');
+      await db.query('ALTER TABLE `faculties` AUTO_INCREMENT = 1');
+      await db.query('ALTER TABLE `universities` AUTO_INCREMENT = 1');
+
+      // ── Build university list (deduplicate) ───────────────────────────
+      const uniMap = new Map(); // name_th → id (ใส่หลัง insert)
+      const uniOrder = [];
+      for (const r of rows) {
+        const name_th = (r.university_name_th || '').trim();
+        if (!name_th || uniMap.has(name_th)) continue;
+        uniMap.set(name_th, null);
+        uniOrder.push({
+          name_th,
+          name_en: (r.university_name_en || '').trim() || null,
+          university_type: (r.university_type_name_th || '').trim() || null,
+        });
+      }
+
+      for (const u of uniOrder) {
+        const [result] = await db.query(
+          'INSERT INTO `universities` (name_th, name_en, university_type) VALUES (?, ?, ?)',
+          [u.name_th, u.name_en, u.university_type]
+        );
+        uniMap.set(u.name_th, result.insertId);
+      }
+
+      // ── Build faculty list (deduplicate per university) ───────────────
+      const facMap = new Map(); // `${uniId}::${name_th}` → id
+      const facOrder = [];
+      for (const r of rows) {
+        const uniName = (r.university_name_th || '').trim();
+        const facName = (r.faculty_name_th || '').trim();
+        if (!uniName || !facName) continue;
+        const uniId = uniMap.get(uniName);
+        if (!uniId) continue;
+        const key = `${uniId}::${facName}`;
+        if (facMap.has(key)) continue;
+        facMap.set(key, null);
+        facOrder.push({
+          university_id: uniId,
+          name_th: facName,
+          name_en: (r.faculty_name_en || '').trim() || null,
+        });
+      }
+
+      for (const f of facOrder) {
+        const [result] = await db.query(
+          'INSERT INTO `faculties` (university_id, name_th, name_en) VALUES (?, ?, ?)',
+          [f.university_id, f.name_th, f.name_en]
+        );
+        facMap.set(`${f.university_id}::${f.name_th}`, result.insertId);
+      }
+
+      // ── Insert programs ───────────────────────────────────────────────
+      let programCount = 0;
+      const progInserts = [];
+      for (const r of rows) {
+        const uniName = (r.university_name_th || '').trim();
+        const facName = (r.faculty_name_th || '').trim();
+        const progName = (r.program_name_th || '').trim();
+        if (!uniName || !facName || !progName) continue;
+        const uniId = uniMap.get(uniName);
+        if (!uniId) continue;
+        const facId = facMap.get(`${uniId}::${facName}`);
+        if (!facId) continue;
+        progInserts.push([
+          facId,
+          (r.campus_name_th || '').trim() || null,
+          (r.group_field_th || '').trim() || null,
+          (r.field_name_th || '').trim() || null,
+          (r.field_name_en || '').trim() || null,
+          progName,
+          (r.program_name_en || '').trim() || null,
+          (r.program_type_name_th || '').trim() || null,
+        ]);
+      }
+
+      // Batch insert programs (chunks of 100)
+      const CHUNK = 100;
+      for (let i = 0; i < progInserts.length; i += CHUNK) {
+        const chunk = progInserts.slice(i, i + CHUNK);
+        const [result] = await db.query(
+          `INSERT INTO \`programs\`
+           (faculty_id, campus, group_field, field_name_th, field_name_en, program_name_th, program_name_en, program_type)
+           VALUES ?`,
+          [chunk]
+        );
+        programCount += result.affectedRows;
+      }
+
+      res.json({
+        message: 'Import Excel สำเร็จ',
+        universities: uniOrder.length,
+        faculties: facOrder.length,
+        programs: programCount,
+      });
+    } catch (err) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+});
+
+// ─── POST /api/universities/sync-wiki-list ────────────────────────────────
+// ดึงรายชื่อมหาวิทยาลัยจาก Wikipedia Category API (ไม่ขึ้นกับ structure ของหน้า)
+router.post('/sync-wiki-list', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await ensureTables();
+    if (!fs.existsSync(LOGO_DIR)) fs.mkdirSync(LOGO_DIR, { recursive: true });
+
+    // categories ที่พิสูจน์แล้วว่ามีในวิกิพีเดียไทย
+    const CATEGORIES = [
+      { cat: 'หมวดหมู่:สถาบันอุดมศึกษาในกำกับของรัฐ', type: 'ทปอ.' },
+      { cat: 'หมวดหมู่:มหาวิทยาลัยราชภัฏ',             type: 'ราชภัฏ' },
+      { cat: 'หมวดหมู่:มหาวิทยาลัยเทคโนโลยีราชมงคล',   type: 'ราชมงคล' },
+      { cat: 'หมวดหมู่:สถาบันอุดมศึกษาเอกชนในประเทศไทย', type: 'เอกชน' },
+    ];
+
+    // helper: ดึงสมาชิก category ทั้งหมด (pagination)
+    const getCategoryMembers = async (catTitle) => {
+      const members = [];
+      let cmcontinue = null;
+      do {
+        const url = `https://th.wikipedia.org/w/api.php?action=query&list=categorymembers&cmtitle=${encodeURIComponent(catTitle)}&cmlimit=50&cmtype=page&format=json${cmcontinue ? '&cmcontinue=' + encodeURIComponent(cmcontinue) : ''}`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(12000) });
+        if (!r.ok) break;
+        const d = await r.json();
+        const pages = d?.query?.categorymembers || [];
+        members.push(...pages);
+        cmcontinue = d?.continue?.cmcontinue || null;
+      } while (cmcontinue);
+      return members;
+    };
+
+    // 1. ดึงรายชื่อทุก category
+    const uniList = []; // { wiki_title, type }
+    for (const { cat, type } of CATEGORIES) {
+      const members = await getCategoryMembers(cat);
+      for (const m of members) {
+        const title = m.title;
+        // กรอง: ต้องมีคำสำคัญ ไม่ใช่บทความทั่วไป
+        if (
+          (title.includes('มหาวิทยาลัย') || title.includes('สถาบัน') || title.includes('วิทยาลัย')) &&
+          !title.startsWith('หมวดหมู่:') && !title.startsWith('รายนาม') &&
+          !title.startsWith('กีฬา') && !title.startsWith('วัน')
+        ) {
+          if (!uniList.find(u => u.wiki_title === title)) {
+            uniList.push({ wiki_title: title, name_th: title, type });
+          }
+        }
+      }
+    }
+
+    if (uniList.length === 0) {
+      return res.status(422).json({ message: 'ไม่สามารถดึงข้อมูลจาก Wikipedia ได้ กรุณาลองใหม่' });
+    }
+
+    // 2. เทียบกับ DB ที่มีอยู่
+    const [existing] = await db.query('SELECT name_th FROM `universities`');
+    const existingSet = new Set(existing.map(u => u.name_th));
+    const toAdd = uniList.filter(u => !existingSet.has(u.name_th));
+
+    // 3. ดึงรายละเอียด + โลโก้แล้ว INSERT
+    let added = 0;
+    const CONCURRENCY = 3;
+
+    const processNew = async (uni) => {
+      try {
+        const url = `https://th.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(uni.wiki_title)}&prop=revisions|pageimages&rvprop=content&pithumbsize=400&format=json&redirects=1`;
+        const r2 = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(12000) });
+        let name_en = null, short_name = null, logoUrl = null, displayName = uni.name_th;
+
+        if (r2.ok) {
+          const d2 = await r2.json();
+          const page = Object.values(d2?.query?.pages || {})[0];
+          if (!page || page.missing !== undefined) return;
+          // ถ้า redirect ให้ใช้ชื่อหน้าจริง
+          if (d2?.query?.redirects?.[0]?.to) displayName = d2.query.redirects[0].to;
+          logoUrl = page?.thumbnail?.source || null;
+          const wikitext = page?.revisions?.[0]?.['*'] || '';
+          const enM = wikitext.match(/\|\s*ชื่ออังกฤษ\s*=\s*([^\n|{}[\]<]+)/);
+          if (enM) name_en = enM[1].trim() || null;
+          const shortM = wikitext.match(/\|\s*ชื่อย่อ\s*=\s*([^\n|{}[\]<]+)/);
+          if (shortM) short_name = shortM[1].replace(/\[\[.*?\]\]/g, '').trim() || null;
+        }
+
+        const [ins] = await db.query(
+          'INSERT IGNORE INTO `universities` (name_th, name_en, short_name, university_type) VALUES (?, ?, ?, ?)',
+          [displayName, name_en, short_name, uni.type]
+        );
+
+        if (ins.affectedRows && ins.insertId && logoUrl) {
+          try {
+            const imgRes = await fetch(logoUrl, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(15000) });
+            if (imgRes.ok) {
+              const ct = imgRes.headers.get('content-type') || '';
+              if (!ct.includes('svg') && !ct.includes('text')) {
+                const ext = ct.includes('png') ? '.png' : '.jpg';
+                const filename = `logo-wiki-${ins.insertId}-${Date.now()}${ext}`;
+                fs.writeFileSync(path.join(LOGO_DIR, filename), Buffer.from(await imgRes.arrayBuffer()));
+                await db.query('UPDATE `universities` SET logo_url = ? WHERE id = ?', [`/uploads/logos/${filename}`, ins.insertId]);
+              }
+            }
+          } catch {}
+        }
+
+        if (ins.affectedRows) added++;
+      } catch {}
+    };
+
+    for (let i = 0; i < toAdd.length; i += CONCURRENCY) {
+      await Promise.all(toAdd.slice(i, i + CONCURRENCY).map(processNew));
+    }
+
+    res.json({
+      message: `เพิ่มมหาวิทยาลัยจาก Wikipedia สำเร็จ ${added} แห่ง (พบทั้งหมด ${uniList.length} แห่ง มีในระบบแล้ว ${uniList.length - toAdd.length})`,
+      added,
+      skipped: uniList.length - toAdd.length,
+      total: uniList.length,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── POST /api/universities/sync-logos ───────────────────────────────────
+// ค้นหาโลโก้จาก Wikipedia (ภาษาไทย) ตามชื่อมหาวิทยาลัย
+router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await ensureTables();
+    const { force } = req.body;
+
+    const [unis] = await db.query(
+      force
+        ? 'SELECT id, name_th, name_en, short_name FROM `universities` ORDER BY id'
+        : 'SELECT id, name_th, name_en, short_name FROM `universities` WHERE (logo_url IS NULL OR logo_url = "") ORDER BY id'
+    );
+
+    if (unis.length === 0) {
+      return res.json({ message: 'ทุกมหาวิทยาลัยมีโลโก้แล้ว', found: 0, total: 0 });
+    }
+
+    let found = 0;
+    const CONCURRENCY = 3;
+
+    // ── helper: ดึง thumbnail URL จาก Wikipedia page object ────────────────
+    const getImgFromWikiPage = (pages) => {
+      const page = Object.values(pages)[0];
+      if (!page || page.missing !== undefined) return null;
+      return page?.thumbnail?.source || null;
+    };
+
+    // ── helper: ค้นหา Wikipedia ด้วย Search API แล้วเอา pageimages ────────
+    const searchWikiImg = async (lang, query) => {
+      try {
+        // Step 1: search หา title ที่ใกล้เคียงที่สุด
+        const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=0&srlimit=1&format=json`;
+        const sr = await fetch(searchUrl, {
+          headers: { 'User-Agent': 'GradTrackBot/1.0' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!sr.ok) return null;
+        const srData = await sr.json();
+        const title = srData?.query?.search?.[0]?.title;
+        if (!title) return null;
+
+        // Step 2: เอา pageimages จาก title ที่หาได้
+        const imgUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&redirects=1`;
+        const ir = await fetch(imgUrl, {
+          headers: { 'User-Agent': 'GradTrackBot/1.0' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!ir.ok) return null;
+        const irData = await ir.json();
+        return getImgFromWikiPage(irData?.query?.pages || {});
+      } catch { return null; }
+    };
+
+    // ── helper: direct lookup ด้วยชื่อแน่นอน ──────────────────────────────
+    const directWikiImg = async (lang, title) => {
+      try {
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&redirects=1`;
+        const r = await fetch(url, {
+          headers: { 'User-Agent': 'GradTrackBot/1.0' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!r.ok) return null;
+        const data = await r.json();
+        return getImgFromWikiPage(data?.query?.pages || {});
+      } catch { return null; }
+    };
+
+    // ── helper: download & save image ─────────────────────────────────────
+    const saveImg = async (imgUrl, uniId) => {
+      const imgRes = await fetch(imgUrl, {
+        headers: { 'User-Agent': 'GradTrackBot/1.0' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!imgRes.ok) return false;
+      const ct = imgRes.headers.get('content-type') || '';
+      if (ct.includes('svg') || ct.includes('text')) return false;
+      const ext = ct.includes('png') ? '.png' : '.jpg';
+      const filename = `logo-wiki-${uniId}-${Date.now()}${ext}`;
+      const filepath = path.join(LOGO_DIR, filename);
+
+      // ลบโลโก้เก่า
+      const [ex] = await db.query('SELECT logo_url FROM `universities` WHERE id = ?', [uniId]);
+      const oldUrl = ex[0]?.logo_url;
+      if (oldUrl?.startsWith('/uploads/')) {
+        const oldPath = path.join(__dirname, '..', oldUrl);
+        if (fs.existsSync(oldPath)) try { fs.unlinkSync(oldPath); } catch {}
+      }
+
+      fs.writeFileSync(filepath, Buffer.from(await imgRes.arrayBuffer()));
+      await db.query('UPDATE `universities` SET logo_url = ? WHERE id = ?', [`/uploads/logos/${filename}`, uniId]);
+      return true;
+    };
+
+    const processUni = async (uni) => {
+      try {
+        let imgUrl = null;
+
+        // 1. Direct lookup ชื่อไทย (เร็วสุด ถ้าชื่อตรง)
+        imgUrl = await directWikiImg('th', uni.name_th);
+
+        // 2. Search API ชื่อไทย (fuzzy)
+        if (!imgUrl) imgUrl = await searchWikiImg('th', uni.name_th);
+
+        // 3. Search API ชื่อย่อ + "มหาวิทยาลัย"
+        if (!imgUrl && uni.short_name) {
+          imgUrl = await searchWikiImg('th', `มหาวิทยาลัย ${uni.short_name}`);
+        }
+
+        // 4. Fallback: Wikipedia English ด้วยชื่ออังกฤษ
+        if (!imgUrl && uni.name_en) {
+          imgUrl = await directWikiImg('en', uni.name_en);
+          if (!imgUrl) imgUrl = await searchWikiImg('en', uni.name_en);
+        }
+
+        // 5. ตัด "มหาวิทยาลัย" / "สถาบัน" / "วิทยาลัย" หน้าออก แล้วค้นส่วนที่เหลือ
+        if (!imgUrl) {
+          const stripped = uni.name_th.replace(/^(มหาวิทยาลัย|สถาบัน|วิทยาลัย)\s*/u, '').trim();
+          if (stripped && stripped !== uni.name_th) {
+            imgUrl = await searchWikiImg('th', stripped);
+          }
+        }
+
+        if (!imgUrl) return;
+        const saved = await saveImg(imgUrl, uni.id);
+        if (saved) found++;
+      } catch {
+        // ข้าม
+      }
+    };
+
+    for (let i = 0; i < unis.length; i += CONCURRENCY) {
+      await Promise.all(unis.slice(i, i + CONCURRENCY).map(processUni));
+    }
+
+    res.json({
+      message: `ซิงค์โลโก้สำเร็จ ${found} จาก ${unis.length} มหาวิทยาลัย`,
+      found,
+      total: unis.length,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const logger = require('../config/logger');
 const { loginLimiter } = require('../middlewares/rateLimiter');
+const { logActivity } = require('./activityLogs');
 
 // POST /api/auth/login
 router.post('/login', loginLimiter, async (req, res) => {
@@ -40,6 +41,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     );
 
     logger.info('Login success', { username, role: user.role, ip: req.ip });
+    logActivity({ username: user.username, name: user.name, role: user.role, action: 'login', target: '', detail: null });
 
     res.json({
       token,

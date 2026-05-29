@@ -1,17 +1,23 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+﻿import { useEffect, useState, useMemo, useRef } from 'react';
 import api from '../../utils/api';
 
-const EMPTY_FORM = { name: '', short_name: '', logo_url: '' };
+const TYPE_BADGE = {
+  'ทปอ.':    'badge-primary',
+  'ราชภัฏ':  'badge-secondary',
+  'ราชมงคล': 'badge-accent',
+  'เอกชน':   'badge-ghost',
+};
 
 export default function UniversitiesPage() {
   const [unis, setUnis] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [toast, setToast] = useState(null);
 
   // Modal create/edit
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState({ name: '', short_name: '', logo_url: '' });
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState('');
   const [saving, setSaving] = useState(false);
@@ -21,26 +27,33 @@ export default function UniversitiesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Sync ชื่อ
+  // Import Excel
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importConfirm, setImportConfirm] = useState(null); // เก็บ File object รอ confirm
+
+  // Clear all
+  const [clearing, setClearing] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
+
+  // Sync logos
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [syncConfirm, setSyncConfirm] = useState(false); // false | 'missing' | 'all'
 
-  // Sync Logo
-  const [syncingLogos, setSyncingLogos] = useState(false);
-  const [syncLogoResult, setSyncLogoResult] = useState(null);
-  const [logoSyncProgress, setLogoSyncProgress] = useState({ current: 0, total: 0 });
-
-  // Toast
-  const [toast, setToast] = useState(null);
+  // Sync from Wikipedia
+  const [wikiSyncing, setWikiSyncing] = useState(false); // 'unis' | 'faculties' | 'programs' | null
+  const [wikiSyncResult, setWikiSyncResult] = useState(null);
+  const [wikiSyncConfirm, setWikiSyncConfirm] = useState(null); // null | 'unis' | 'faculties' | 'programs'
 
   const fileRef = useRef(null);
+  const excelRef = useRef(null);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
+    setTimeout(() => setToast(null), 4000);
   };
 
-  // ─── Load ───────────────────────────────────────────────────────────────
   const load = async () => {
     setLoading(true);
     try {
@@ -55,35 +68,15 @@ export default function UniversitiesPage() {
 
   useEffect(() => { load(); }, []);
 
-  // ─── Filter ─────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     if (!search) return unis;
     const q = search.toLowerCase();
-    return unis.filter(
-      (u) =>
-        u.name.toLowerCase().includes(q) ||
-        (u.short_name || '').toLowerCase().includes(q)
+    return unis.filter(u =>
+      u.name.toLowerCase().includes(q) ||
+      (u.name_en || '').toLowerCase().includes(q) ||
+      (u.short_name || '').toLowerCase().includes(q)
     );
   }, [unis, search]);
-
-  // ─── Modal helpers ───────────────────────────────────────────────────────
-  const openCreate = () => {
-    setEditTarget(null);
-    setForm(EMPTY_FORM);
-    setLogoFile(null);
-    setLogoPreview('');
-    setFormError('');
-    setModalOpen(true);
-  };
-
-  const openEdit = (u) => {
-    setEditTarget(u);
-    setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '' });
-    setLogoFile(null);
-    setLogoPreview(u.logo_url || '');
-    setFormError('');
-    setModalOpen(true);
-  };
 
   // ─── Logo file select ────────────────────────────────────────────────────
   const handleLogoSelect = (e) => {
@@ -91,123 +84,98 @@ export default function UniversitiesPage() {
     if (!file) return;
     setLogoFile(file);
     const reader = new FileReader();
-    reader.onload = (ev) => setLogoPreview(ev.target.result);
+    reader.onload = ev => setLogoPreview(ev.target.result);
     reader.readAsDataURL(file);
-    setForm((f) => ({ ...f, logo_url: '' }));
+    setForm(f => ({ ...f, logo_url: '' }));
   };
 
-  // ─── Save ────────────────────────────────────────────────────────────────
+  const openCreate = () => {
+    setEditTarget(null);
+    setForm({ name: '', short_name: '', logo_url: '' });
+    setLogoFile(null); setLogoPreview(''); setFormError('');
+    setModalOpen(true);
+  };
+
+  const openEdit = (u) => {
+    setEditTarget(u);
+    setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '' });
+    setLogoFile(null); setLogoPreview(u.logo_url || ''); setFormError('');
+    setModalOpen(true);
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { setFormError('กรุณากรอกชื่อมหาวิทยาลัย'); return; }
-    setSaving(true);
-    setFormError('');
+    setSaving(true); setFormError('');
     try {
       const fd = new FormData();
       fd.append('name', form.name.trim());
       fd.append('short_name', form.short_name.trim());
-      if (logoFile) {
-        fd.append('logo', logoFile);
-      } else {
-        fd.append('logo_url', form.logo_url.trim());
-      }
+      if (logoFile) fd.append('logo', logoFile);
+      else fd.append('logo_url', form.logo_url.trim());
 
       if (editTarget) {
-        await api.put(`/universities/${editTarget.id}`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        await api.put(`/universities/${editTarget.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         showToast('แก้ไขสำเร็จ ✅');
       } else {
-        await api.post('/universities', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        await api.post('/universities', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         showToast('เพิ่มมหาวิทยาลัยสำเร็จ ✅');
       }
-      setModalOpen(false);
-      load();
+      setModalOpen(false); load();
     } catch (err) {
       setFormError(err.response?.data?.message || 'บันทึกไม่สำเร็จ');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  // ─── Delete ──────────────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
       await api.delete(`/universities/${deleteTarget.id}`);
       showToast('ลบสำเร็จ');
-      setDeleteTarget(null);
-      load();
-    } catch {
-      showToast('ลบไม่สำเร็จ', 'error');
-    } finally {
-      setDeleting(false);
-    }
+      setDeleteTarget(null); load();
+    } catch { showToast('ลบไม่สำเร็จ', 'error'); }
+    finally { setDeleting(false); }
   };
 
-  // ─── Sync ชื่อ ──────────────────────────────────────────────────────────
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncResult(null);
+  // ─── Import Excel ─────────────────────────────────────────────────────────
+  const handleImportExcel = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    e.target.value = '';
+    setImportConfirm(file); // เปิด modal confirm
+  };
+
+  const doImport = async (file) => {
+    setImportConfirm(null);
+    setImporting(true); setImportResult(null);
     try {
-      const res = await api.post('/universities/sync');
-      setSyncResult({ ok: true, ...res.data });
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await api.post('/universities/import-excel', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000,
+      });
+      setImportResult({ ok: true, ...res.data });
       load();
     } catch (err) {
-      setSyncResult({ ok: false, message: err.response?.data?.message || 'Sync ไม่สำเร็จ' });
-    } finally {
-      setSyncing(false);
-    }
+      setImportResult({ ok: false, message: err.response?.data?.message || 'Import ไม่สำเร็จ', examples: err.response?.data?.examples || [] });
+    } finally { setImporting(false); }
   };
 
-  // ─── Sync Logo ───────────────────────────────────────────────────────────
-  const handleSyncLogos = async () => {
-    const noLogo = unis.filter((u) => !u.logo_url);
-    if (noLogo.length === 0) {
-      showToast('ทุก university มี logo แล้ว ✅');
-      return;
-    }
-    setSyncingLogos(true);
-    setSyncLogoResult(null);
-    setLogoSyncProgress({ current: 0, total: noLogo.length });
-    try {
-      const res = await api.post('/universities/sync-logos', {}, { timeout: 300000 });
-      setSyncLogoResult({ ok: true, ...res.data });
-      load();
-    } catch (err) {
-      setSyncLogoResult({ ok: false, message: err.response?.data?.message || 'Sync logo ไม่สำเร็จ' });
-    } finally {
-      setSyncingLogos(false);
-      setLogoSyncProgress({ current: 0, total: 0 });
-    }
-  };
-
-  // ─── Logo preview component ──────────────────────────────────────────────
-  const LogoImg = ({ src, size = 8 }) =>
+  const LogoImg = ({ src }) =>
     src ? (
-      <img
-        src={src}
-        alt="logo"
-        className={`w-${size} h-${size} object-contain rounded`}
-        onError={(e) => { e.target.style.display = 'none'; }}
-      />
+      <img src={src} alt="logo" className="w-8 h-8 object-contain rounded"
+        onError={e => { e.target.style.display = 'none'; }} />
     ) : (
-      <div className={`w-${size} h-${size} rounded bg-base-200 flex items-center justify-center text-base-content/30 text-xs`}>
-        🏛️
-      </div>
+      <div className="w-8 h-8 rounded bg-base-200 flex items-center justify-center text-base-content/30 text-xs">🏛️</div>
     );
 
   return (
     <div className="relative">
-      {/* Toast */}
       {toast && (
         <div className="toast toast-top toast-end z-50">
-          <div className={`alert alert-${toast.type === 'error' ? 'error' : 'success'} py-2 text-sm`}>
-            {toast.msg}
-          </div>
+          <div className={`alert alert-${toast.type === 'error' ? 'error' : 'success'} py-2 text-sm`}>{toast.msg}</div>
         </div>
       )}
 
@@ -215,68 +183,128 @@ export default function UniversitiesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         <div>
           <h2 className="text-lg font-semibold">🏛️ มหาวิทยาลัย</h2>
-          <p className="text-xs text-base-content/50">จัดการรายชื่อมหาวิทยาลัย · ชื่อย่อ · โลโก้</p>
+          <p className="text-xs text-base-content/50">จัดการรายชื่อมหาวิทยาลัย · โลโก้ · นำเข้าจาก Excel</p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          {/* Sync from Wikipedia (unis + faculties) */}
           <button
             className="btn btn-outline btn-sm gap-1"
-            onClick={handleSync}
-            disabled={syncing || syncingLogos}
+            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('unis'); }}
+            disabled={!!wikiSyncing || syncing || importing || clearing}
           >
-            {syncing ? <span className="loading loading-spinner loading-xs" /> : '🔄'}
-            Sync ชื่อ
+            {wikiSyncing === 'unis' ? <span className="loading loading-spinner loading-xs" /> : '🏛️'}
+            ซิงค์มหาลัย
           </button>
           <button
             className="btn btn-outline btn-sm gap-1"
-            onClick={handleSyncLogos}
-            disabled={syncing || syncingLogos}
-            title={`Sync logo สำหรับ ${unis.filter(u => !u.logo_url).length} รายการที่ยังไม่มี logo`}
+            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('faculties'); }}
+            disabled={!!wikiSyncing || syncing || importing || clearing}
           >
-            {syncingLogos ? <span className="loading loading-spinner loading-xs" /> : '🖼️'}
-            Sync Logo {unis.filter(u => !u.logo_url).length > 0 && !syncingLogos && (
-              <span className="badge badge-sm badge-warning">{unis.filter(u => !u.logo_url).length}</span>
-            )}
+            {wikiSyncing === 'faculties' ? <span className="loading loading-spinner loading-xs" /> : '🏫'}
+            ซิงค์คณะ
+          </button>
+          <button
+            className="btn btn-outline btn-sm gap-1"
+            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('programs'); }}
+            disabled={!!wikiSyncing || syncing || importing || clearing}
+          >
+            {wikiSyncing === 'programs' ? <span className="loading loading-spinner loading-xs" /> : '📚'}
+            ซิงค์หลักสูตร
+          </button>
+          {/* Sync Logos */}
+          <button
+            className="btn btn-outline btn-sm gap-1"
+            onClick={() => { setSyncResult(null); setSyncConfirm('missing'); }}
+            disabled={syncing || !!wikiSyncing || importing || clearing}
+          >
+            {syncing ? <span className="loading loading-spinner loading-xs" /> : '🖼️'}
+            ซิงค์โลโก้
+          </button>
+          {/* Clear All */}
+          <button
+            className="btn btn-error btn-outline btn-sm gap-1"
+            onClick={() => setClearConfirm(true)}
+            disabled={clearing || importing || syncing}
+          >
+            {clearing ? <span className="loading loading-spinner loading-xs" /> : '🗑️'}
+            ล้างข้อมูล
+          </button>
+          {/* Import Excel */}
+          <input ref={excelRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
+          <button
+            className="btn btn-outline btn-sm gap-1"
+            onClick={() => excelRef.current.click()}
+            disabled={importing || clearing}
+          >
+            {importing ? <span className="loading loading-spinner loading-xs" /> : '📥'}
+            Import Excel
           </button>
           <button className="btn btn-primary btn-sm gap-1" onClick={openCreate}>
-            ➕ เพิ่มมหาวิทยาลัย
+            ➕ เพิ่มเอง
           </button>
         </div>
       </div>
 
+      {/* Wiki sync result */}
+      {wikiSyncResult && (
+        <div className={`alert ${wikiSyncResult.error ? 'alert-error' : 'alert-success'} mb-4 py-3 text-sm`}>
+          <div className="flex-1"><p>{wikiSyncResult.message}</p></div>
+          <button className="btn btn-ghost btn-xs" onClick={() => setWikiSyncResult(null)}>✕</button>
+        </div>
+      )}
+
       {/* Sync result */}
       {syncResult && (
-        <div
-          className={`alert ${syncResult.ok ? 'alert-success' : 'alert-error'} mb-4 py-3 text-sm`}
-        >
+        <div className={`alert ${syncResult.found > 0 ? 'alert-success' : 'alert-info'} mb-4 py-3 text-sm`}>
           <div className="flex-1">
-            {syncResult.ok ? (
-              <>
-                <p>✅ {syncResult.message}</p>
-                <p className="text-xs mt-1 opacity-80">
-                  เพิ่มใหม่ <strong>{syncResult.added}</strong> รายการ · มีอยู่แล้ว <strong>{syncResult.skipped}</strong> รายการ · ทั้งหมด {syncResult.total} รายการ
-                </p>
-                {syncResult.warnings?.length > 0 && (
-                  <p className="text-xs mt-1 opacity-60">⚠️ {syncResult.warnings.join(' | ')}</p>
-                )}
-              </>
-            ) : (
-              <p>❌ {syncResult.message}</p>
-            )}
+            <p>🖼️ {syncResult.message}</p>
           </div>
           <button className="btn btn-ghost btn-xs" onClick={() => setSyncResult(null)}>✕</button>
+        </div>
+      )}
+
+      {/* Import result */}
+      {importResult && (
+        <div className={`alert ${importResult.ok ? 'alert-success' : 'alert-error'} mb-4 py-3 text-sm`}>
+          <div className="flex-1">
+            {importResult.ok ? (
+              <>
+                <p>✅ {importResult.message}</p>
+                <p className="text-xs mt-1 opacity-80">
+                  🏛️ มหาวิทยาลัย <strong>{importResult.universities}</strong> แห่ง ·
+                  📚 คณะ <strong>{importResult.faculties}</strong> คณะ ·
+                  📋 หลักสูตร <strong>{importResult.programs}</strong> หลักสูตร
+                </p>
+              </>
+            ) : (
+              <>
+                <p>❌ {importResult.message}</p>
+                {importResult.examples?.length > 0 && (
+                  <div className="mt-2 text-xs opacity-80">
+                    <p className="font-semibold mb-1">ตัวอย่างสาขาซ้ำ (5 รายการแรก):</p>
+                    <ul className="list-disc list-inside space-y-0.5">
+                      {importResult.examples.map((ex, i) => (
+                        <li key={i}>{ex.university} › {ex.faculty} › {ex.program}{ex.campus !== '-' ? ` (${ex.campus})` : ''}{ex.type !== '-' ? ` [${ex.type}]` : ''}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <button className="btn btn-ghost btn-xs" onClick={() => setImportResult(null)}>✕</button>
         </div>
       )}
 
       {/* Search */}
       <input
         type="text"
-        placeholder="🔍 ค้นหาชื่อหรือชื่อย่อ..."
-        className="input input-bordered input-sm w-full max-w-xs mb-4"
+        placeholder="🔍 ค้นหาชื่อไทย / อังกฤษ / ชื่อย่อ..."
+        className="input input-bordered input-sm w-full max-w-sm mb-4"
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={e => setSearch(e.target.value)}
       />
 
-      {/* Stats */}
       {!loading && (
         <p className="text-xs text-base-content/40 mb-3">
           🏛️ ทั้งหมด {unis.length} แห่ง · แสดง {filtered.length} รายการ
@@ -289,109 +317,74 @@ export default function UniversitiesPage() {
           <thead>
             <tr className="text-xs text-base-content/60 uppercase tracking-wide">
               <th>#</th>
-              <th>🖼️ โลโก้</th>
-              <th>🏛️ ชื่อมหาวิทยาลัย</th>
-              <th>🔤 ชื่อย่อ</th>
-              <th className="text-right">⚙️ จัดการ</th>
+              <th>โลโก้</th>
+              <th>ชื่อมหาวิทยาลัย</th>
+              <th>ประเภท</th>
+              <th>ชื่อย่อ</th>
+              <th className="text-right">จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={5} className="text-center py-12 text-base-content/40">
-                  <span className="loading loading-spinner loading-sm mr-2" />
-                  กำลังโหลด...
-                </td>
-              </tr>
+              <tr><td colSpan={6} className="text-center py-12 text-base-content/40">
+                <span className="loading loading-spinner loading-sm mr-2" />กำลังโหลด...
+              </td></tr>
             ) : filtered.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="text-center py-12 text-base-content/30">
-                  {unis.length === 0 ? 'ยังไม่มีข้อมูล กด Sync หรือเพิ่มเอง' : 'ไม่พบผลการค้นหา'}
+              <tr><td colSpan={6} className="text-center py-12 text-base-content/30">
+                {unis.length === 0 ? 'ยังไม่มีข้อมูล กด "Import Excel" เพื่อนำเข้าข้อมูล' : 'ไม่พบผลการค้นหา'}
+              </td></tr>
+            ) : filtered.map((u, i) => (
+              <tr key={u.id}>
+                <td className="text-base-content/40 text-xs">{i + 1}</td>
+                <td><LogoImg src={u.logo_url} /></td>
+                <td>
+                  <div className="font-medium text-sm max-w-xs truncate">{u.name}</div>
+                  {u.name_en && <div className="text-xs text-base-content/40 truncate max-w-xs">{u.name_en}</div>}
+                </td>
+                <td>
+                  {u.university_type ? (
+                    <span className={`badge badge-sm ${TYPE_BADGE[u.university_type] || 'badge-outline'}`}>
+                      {u.university_type}
+                    </span>
+                  ) : <span className="text-base-content/30 text-xs">—</span>}
+                </td>
+                <td>
+                  {u.short_name
+                    ? <span className="badge badge-outline badge-sm font-mono">{u.short_name}</span>
+                    : <span className="text-base-content/30 text-xs">—</span>}
+                </td>
+                <td className="text-right">
+                  <div className="flex justify-end gap-1">
+                    <button className="btn btn-ghost btn-xs" onClick={() => openEdit(u)}>✏️ แก้ไข</button>
+                    <button className="btn btn-ghost btn-xs text-error" onClick={() => setDeleteTarget(u)}>🗑️ ลบ</button>
+                  </div>
                 </td>
               </tr>
-            ) : (
-              filtered.map((u, i) => (
-                <tr key={u.id}>
-                  <td className="text-base-content/40 text-xs">{i + 1}</td>
-                  <td>
-                    <LogoImg src={u.logo_url} size={8} />
-                  </td>
-                  <td className="font-medium max-w-xs truncate">{u.name}</td>
-                  <td>
-                    {u.short_name ? (
-                      <span className="badge badge-outline badge-sm font-mono">{u.short_name}</span>
-                    ) : (
-                      <span className="text-base-content/30 text-xs">—</span>
-                    )}
-                  </td>
-                  <td className="text-right">
-                    <div className="flex justify-end gap-1">
-                      <button className="btn btn-ghost btn-xs" onClick={() => openEdit(u)}>
-                        ✏️ แก้ไข
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-xs text-error"
-                        onClick={() => setDeleteTarget(u)}
-                      >
-                        🗑️ ลบ
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
+            ))}
           </tbody>
         </table>
       </div>
 
-      {/* ─── Modal Create/Edit ─── */}
+      {/* Modal Create/Edit */}
       {modalOpen && (
         <div className="modal modal-open">
           <div className="modal-box max-w-md">
-            <div className="flex items-center gap-2 mb-5">
-              <span className="text-2xl">{editTarget ? '✏️' : '🏛️'}</span>
-              <div>
-                <h3 className="font-semibold text-base leading-tight">
-                  {editTarget ? 'แก้ไขมหาวิทยาลัย' : 'เพิ่มมหาวิทยาลัย'}
-                </h3>
-                {editTarget && (
-                  <p className="text-xs text-base-content/50">{editTarget.short_name || editTarget.name}</p>
-                )}
-              </div>
-            </div>
-
+            <h3 className="font-semibold text-base mb-4">
+              {editTarget ? '✏️ แก้ไขมหาวิทยาลัย' : '🏛️ เพิ่มมหาวิทยาลัย'}
+            </h3>
             <form onSubmit={handleSave} className="flex flex-col gap-3">
-              {/* Logo preview + upload */}
+              {/* Logo */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-base-content/70">🖼️ โลโก้</label>
                 <div className="flex items-center gap-3">
-                  {/* Preview */}
                   <div className="w-16 h-16 rounded-lg bg-base-200 flex items-center justify-center border border-base-300 overflow-hidden flex-shrink-0">
-                    {logoPreview ? (
-                      <img
-                        src={logoPreview}
-                        alt="preview"
-                        className="w-full h-full object-contain"
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                      />
-                    ) : (
-                      <span className="text-2xl">🏛️</span>
-                    )}
+                    {logoPreview
+                      ? <img src={logoPreview} alt="preview" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                      : <span className="text-2xl">🏛️</span>}
                   </div>
                   <div className="flex flex-col gap-1 flex-1">
-                    {/* File upload */}
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handleLogoSelect}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-xs w-fit"
-                      onClick={() => fileRef.current.click()}
-                    >
+                    <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleLogoSelect} />
+                    <button type="button" className="btn btn-outline btn-xs w-fit" onClick={() => fileRef.current.click()}>
                       📁 อัปโหลดรูป
                     </button>
                     <span className="text-xs text-base-content/40">หรือใส่ URL</span>
@@ -400,49 +393,37 @@ export default function UniversitiesPage() {
                       className="input input-bordered input-xs"
                       placeholder="https://..."
                       value={form.logo_url}
-                      onChange={(e) => {
-                        setForm((f) => ({ ...f, logo_url: e.target.value }));
-                        setLogoFile(null);
-                        setLogoPreview(e.target.value);
-                      }}
+                      onChange={e => { setForm(f => ({ ...f, logo_url: e.target.value })); setLogoFile(null); setLogoPreview(e.target.value); }}
                     />
                   </div>
                 </div>
               </div>
-
-              {/* ชื่อ + ชื่อย่อ */}
+              {/* ชื่อไทย */}
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-base-content/70">🏛️ ชื่อมหาวิทยาลัย *</label>
+                <label className="text-xs font-medium text-base-content/70">🏛️ ชื่อภาษาไทย *</label>
                 <input
-                  type="text"
-                  className="input input-bordered input-sm"
+                  type="text" className="input input-bordered input-sm"
                   placeholder="เช่น มหาวิทยาลัยเชียงใหม่"
                   value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   required
                 />
               </div>
+              {/* ชื่อย่อ */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-base-content/70">
                   🔤 ชื่อย่อ <span className="font-normal text-base-content/40">(ไม่บังคับ)</span>
                 </label>
                 <input
-                  type="text"
-                  className="input input-bordered input-sm font-mono"
+                  type="text" className="input input-bordered input-sm font-mono"
                   placeholder="เช่น มช."
                   value={form.short_name}
-                  onChange={(e) => setForm((f) => ({ ...f, short_name: e.target.value }))}
+                  onChange={e => setForm(f => ({ ...f, short_name: e.target.value }))}
                 />
               </div>
-
-              {formError && (
-                <div className="alert alert-error py-2 text-xs">⚠️ {formError}</div>
-              )}
-
+              {formError && <div className="alert alert-error py-2 text-xs">⚠️ {formError}</div>}
               <div className="modal-action mt-1">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>
-                  ยกเลิก
-                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>ยกเลิก</button>
                 <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
                   {saving && <span className="loading loading-spinner loading-xs" />}
                   {editTarget ? '💾 บันทึก' : '✨ เพิ่ม'}
@@ -454,23 +435,18 @@ export default function UniversitiesPage() {
         </div>
       )}
 
-      {/* ─── Modal Delete ─── */}
+      {/* Modal Delete (single uni) */}
       {deleteTarget && (
         <div className="modal modal-open">
           <div className="modal-box max-w-sm">
             <h3 className="font-bold text-lg">🗑️ ยืนยันการลบ</h3>
             <p className="py-3 text-sm">
-              ต้องการลบ{' '}
-              <span className="font-semibold text-error">{deleteTarget.name}</span>{' '}
-              ใช่หรือไม่?
+              ต้องการลบ <span className="font-semibold text-error">{deleteTarget.name}</span> ใช่หรือไม่?
             </p>
             <div className="modal-action">
-              <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>
-                ยกเลิก
-              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setDeleteTarget(null)}>ยกเลิก</button>
               <button className="btn btn-error btn-sm" onClick={handleDelete} disabled={deleting}>
-                {deleting ? <span className="loading loading-spinner loading-xs" /> : '🗑️'}
-                ลบ
+                {deleting ? <span className="loading loading-spinner loading-xs" /> : '🗑️'} ลบ
               </button>
             </div>
           </div>
@@ -478,61 +454,189 @@ export default function UniversitiesPage() {
         </div>
       )}
 
-      {/* ─── Sync Logo result ─── */}
-      {syncLogoResult && (
-        <div className={`alert ${syncLogoResult.ok ? 'alert-success' : 'alert-error'} mb-4 py-3 text-sm`}>
-          <div className="flex-1">
-            {syncLogoResult.ok ? (
-              <>
-                <p>🖼️ {syncLogoResult.message}</p>
-                <p className="text-xs mt-1 opacity-80">
-                  อัปเดตสำเร็จ <strong>{syncLogoResult.updated}</strong> รายการ
-                  · หาไม่พบ <strong>{syncLogoResult.failed}</strong> รายการ
-                  · ทั้งหมด {syncLogoResult.total} รายการ
-                </p>
-                {syncLogoResult.sourceStats && (
-                  <p className="text-xs mt-1 opacity-70">
-                    🌐 เว็บไซต์: {syncLogoResult.sourceStats.website}
-                    · 🔖 Favicon: {syncLogoResult.sourceStats.favicon}
-                    · 📖 Wikipedia: {syncLogoResult.sourceStats.wikipedia}
-                    · 🖼️ Commons: {syncLogoResult.sourceStats.commons}
-                  </p>
-                )}
-                {syncLogoResult.failedNames?.length > 0 && (
-                  <p className="text-xs mt-1 opacity-60">
-                    ⚠️ หาไม่พบ: {syncLogoResult.failedNames.join(', ')}
-                    {syncLogoResult.failed > 20 ? ` และอีก ${syncLogoResult.failed - 20} รายการ` : ''}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p>❌ {syncLogoResult.message}</p>
-            )}
+      {/* Modal Wiki Sync Confirm */}
+      {wikiSyncConfirm && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-sm">
+            <h3 className="font-bold text-lg">
+              {wikiSyncConfirm === 'unis' ? '🏛️ ซิงค์รายชื่อมหาวิทยาลัย'
+               : wikiSyncConfirm === 'faculties' ? '🏫 ซิงค์คณะ'
+               : '📚 ซิงค์หลักสูตร/สาขาวิชา'}
+            </h3>
+            <div className="py-4 space-y-2 text-sm">
+              {wikiSyncConfirm === 'unis' ? (
+                <>
+                  <p>ดึงรายชื่อมหาวิทยาลัยจากวิกิพีเดีย</p>
+                  <p className="font-medium">รายชื่อมหาวิทยาลัยในประเทศไทย</p>
+                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
+                    <li>เพิ่มเฉพาะมหาวิทยาลัยที่ยังไม่มีในระบบ</li>
+                    <li>ดึงชื่ออังกฤษ ชื่อย่อ ประเภท และโลโก้ด้วย</li>
+                    <li>ไม่แตะข้อมูลที่มีอยู่แล้ว</li>
+                  </ul>
+                </>
+              ) : wikiSyncConfirm === 'faculties' ? (
+                <>
+                  <p>ดึงรายชื่อคณะจากหน้าวิกิพีเดียของแต่ละมหาวิทยาลัย</p>
+                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
+                    <li>เพิ่มเฉพาะคณะที่ยังไม่มีในระบบ</li>
+                    <li>ข้อมูลบางมหาลัยอาจไม่ครบจาก Wikipedia</li>
+                  </ul>
+                </>
+              ) : (
+                <>
+                  <p>ดึงรายชื่อสาขาวิชา/ภาควิชาจากหน้าวิกิพีเดียของแต่ละคณะ</p>
+                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
+                    <li>เพิ่มเฉพาะสาขาที่ยังไม่มีในระบบ</li>
+                    <li>บางคณะอาจไม่มีข้อมูลบน Wikipedia</li>
+                    <li>ใช้เวลานานกว่าเพราะต้องดึงทีละคณะ</li>
+                  </ul>
+                </>
+              )}
+              <p className="text-base-content/50 text-xs">อาจใช้เวลา 1-10 นาทีขึ้นอยู่กับจำนวนคณะ</p>
+            </div>
+            <div className="modal-action">
+              <button className="btn btn-ghost btn-sm" onClick={() => setWikiSyncConfirm(null)}>ยกเลิก</button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  const type = wikiSyncConfirm;
+                  setWikiSyncConfirm(null);
+                  setWikiSyncing(type);
+                  setWikiSyncResult(null);
+                  try {
+                    const endpoint = type === 'unis' ? '/universities/sync-wiki-list'
+                      : type === 'faculties' ? '/faculties/sync-wiki'
+                      : '/faculties/sync-programs';
+                    const r = await api.post(endpoint, {}, { timeout: 600000 });
+                    setWikiSyncResult(r.data);
+                    if (type === 'unis') load();
+                  } catch (err) {
+                    setWikiSyncResult({ error: true, message: err.response?.data?.message || 'ซิงค์ไม่สำเร็จ' });
+                  } finally { setWikiSyncing(null); }
+                }}
+              >
+                {wikiSyncConfirm === 'unis' ? '🏛️' : wikiSyncConfirm === 'faculties' ? '🏫' : '📚'} เริ่มซิงค์
+              </button>
+            </div>
           </div>
-          <button className="btn btn-ghost btn-xs" onClick={() => setSyncLogoResult(null)}>✕</button>
+          <div className="modal-backdrop" onClick={() => setWikiSyncConfirm(null)} />
         </div>
       )}
 
-      {/* ─── Sync Loading Overlay ─── */}
-      {(syncing || syncingLogos) && (
-        <div className="fixed inset-0 bg-black/30 z-40 flex items-center justify-center">
-          <div className="card bg-base-100 p-8 flex flex-col items-center gap-3 shadow-xl min-w-64">
-            <span className="loading loading-spinner loading-lg text-primary" />
-            {syncing ? (
-              <>
-                <p className="font-medium text-sm">กำลัง Sync ชื่อจาก Wikipedia...</p>
-                <p className="text-xs text-base-content/50">อาจใช้เวลาสักครู่</p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium text-sm">🖼️ กำลัง Sync Logo จาก Wikipedia...</p>
-                <p className="text-xs text-base-content/50">
-                  ดึงรูป {unis.filter(u => !u.logo_url).length} มหาวิทยาลัย · อาจใช้เวลา 1-2 นาที
-                </p>
-                <p className="text-xs text-base-content/40">กรุณาอย่าปิดหน้าต่างนี้</p>
-              </>
-            )}
+      {/* Modal Sync Logos Confirm */}
+      {syncConfirm && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-sm">
+            <h3 className="font-bold text-lg">🖼️ ซิงค์โลโก้มหาวิทยาลัย</h3>
+            <div className="py-4 space-y-3 text-sm">
+              <p>ระบบจะค้นหาโลโก้จาก <strong>Wikipedia (ภาษาไทย)</strong> ตามชื่อมหาวิทยาลัย</p>
+              <p className="text-base-content/60">อาจใช้เวลาสักครู่ขึ้นอยู่กับจำนวนมหาวิทยาลัย</p>
+              <div className="form-control">
+                <label className="label cursor-pointer gap-3 justify-start">
+                  <input type="radio" className="radio radio-sm" checked={syncConfirm === 'missing'}
+                    onChange={() => setSyncConfirm('missing')} />
+                  <span>เฉพาะที่ยังไม่มีโลโก้</span>
+                </label>
+                <label className="label cursor-pointer gap-3 justify-start">
+                  <input type="radio" className="radio radio-sm" checked={syncConfirm === 'all'}
+                    onChange={() => setSyncConfirm('all')} />
+                  <span>ทั้งหมด (แทนที่โลโก้เดิมด้วย)</span>
+                </label>
+              </div>
+            </div>
+            <div className="modal-action">
+              <button className="btn btn-ghost btn-sm" onClick={() => setSyncConfirm(false)}>ยกเลิก</button>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  const force = syncConfirm === 'all';
+                  setSyncConfirm(false);
+                  setSyncing(true); setSyncResult(null);
+                  try {
+                    const res = await api.post('/universities/sync-logos', { force }, { timeout: 300000 });
+                    setSyncResult(res.data);
+                    load();
+                  } catch (err) {
+                    setSyncResult({ found: 0, message: err.response?.data?.message || 'ซิงค์ไม่สำเร็จ' });
+                  } finally { setSyncing(false); }
+                }}
+              >
+                🖼️ เริ่มซิงค์
+              </button>
+            </div>
           </div>
+          <div className="modal-backdrop" onClick={() => setSyncConfirm(false)} />
+        </div>
+      )}
+
+      {/* Modal Import Excel Confirm */}
+      {importConfirm && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-sm">
+            <h3 className="font-bold text-lg">📥 ยืนยันการนำเข้าข้อมูล</h3>
+            <div className="py-4 space-y-2 text-sm">
+              <p>ไฟล์: <span className="font-mono font-semibold">{importConfirm.name}</span></p>
+              <p>การดำเนินการนี้จะ<strong>ลบและแทนที่</strong>ข้อมูลทั้งหมด:</p>
+              <ul className="list-none space-y-1 text-base-content/70 pl-2">
+                <li>🏛️ มหาวิทยาลัย ทุกแห่ง</li>
+                <li>🏫 คณะ ทุกคณะ</li>
+                <li>📚 หลักสูตร / สาขา ทุกรายการ</li>
+                <li>🖼️ โลโก้ทุกไฟล์</li>
+              </ul>
+              <p className="text-warning font-medium">ยืนยันหรือไม่?</p>
+            </div>
+            <div className="modal-action">
+              <button className="btn btn-ghost btn-sm" onClick={() => setImportConfirm(null)}>ยกเลิก</button>
+              <button className="btn btn-primary btn-sm" onClick={() => doImport(importConfirm)}>
+                📥 นำเข้าข้อมูล
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => setImportConfirm(null)} />
+        </div>
+      )}
+
+      {/* Modal Clear All */}
+      {clearConfirm && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-sm">
+            <h3 className="font-bold text-lg text-error">⚠️ ล้างข้อมูลทั้งหมด</h3>
+            <div className="py-4 space-y-2 text-sm">
+              <p>การดำเนินการนี้จะ<strong>ลบถาวร</strong>ทั้งหมด:</p>
+              <ul className="list-none space-y-1 text-base-content/70 pl-2">
+                <li>🏛️ มหาวิทยาลัย ทุกแห่ง</li>
+                <li>🏫 คณะ ทุกคณะ</li>
+                <li>📚 หลักสูตร / สาขา ทุกรายการ</li>
+                <li>🖼️ โลโก้ทุกไฟล์</li>
+              </ul>
+              <p className="text-error font-medium mt-2">ไม่สามารถกู้คืนได้ ยืนยันหรือไม่?</p>
+            </div>
+            <div className="modal-action">
+              <button className="btn btn-ghost btn-sm" onClick={() => setClearConfirm(false)} disabled={clearing}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn btn-error btn-sm"
+                disabled={clearing}
+                onClick={async () => {
+                  setClearing(true); setImportResult(null);
+                  try {
+                    await api.delete('/universities/clear-all');
+                    setUnis([]);
+                    setClearConfirm(false);
+                    showToast('ล้างข้อมูลทั้งหมดสำเร็จ');
+                  } catch (err) {
+                    showToast(err.response?.data?.message || 'ล้างข้อมูลไม่สำเร็จ', 'error');
+                    setClearConfirm(false);
+                  } finally { setClearing(false); }
+                }}
+              >
+                {clearing ? <span className="loading loading-spinner loading-xs" /> : '🗑️'}
+                ล้างข้อมูลทั้งหมด
+              </button>
+            </div>
+          </div>
+          <div className="modal-backdrop" onClick={() => !clearing && setClearConfirm(false)} />
         </div>
       )}
     </div>

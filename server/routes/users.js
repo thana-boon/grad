@@ -6,6 +6,7 @@ const { parse } = require('csv-parse');
 const db = require('../config/db');
 const logger = require('../config/logger');
 const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
+const { logActivity } = require('./activityLogs');
 
 // multer เก็บไฟล์ใน memory (ไม่บันทึกลง disk)
 const upload = multer({
@@ -60,6 +61,7 @@ router.post('/', async (req, res) => {
     );
 
     logger.info('User created', { username, role, by: req.user.id });
+    logActivity({ username: req.user.username || String(req.user.id), name: '', role: 'admin', action: 'create_account', target: username, detail: { role } });
     res.status(201).json({ message: 'สร้าง account สำเร็จ', id: result.insertId });
   } catch (err) {
     logger.error('Create user error', { error: err.message });
@@ -127,6 +129,7 @@ router.delete('/:id', async (req, res) => {
 
     await db.query('DELETE FROM users WHERE id = ?', [id]);
     logger.info('User deleted', { targetId: id, by: req.user.id });
+    logActivity({ username: req.user.username || String(req.user.id), name: '', role: 'admin', action: 'delete_account', target: String(id), detail: null });
     res.json({ message: 'ลบ account สำเร็จ' });
   } catch (err) {
     logger.error('Delete user error', { error: err.message });

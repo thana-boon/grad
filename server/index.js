@@ -32,6 +32,7 @@ app.use('/api/universities', require('./routes/universities'));
 app.use('/api/faculties', require('./routes/faculties'));
 app.use('/api/student', require('./routes/studentAuth'));
 app.use('/api/report-settings', require('./routes/reportSettings'));
+app.use('/api/activity-logs', require('./routes/activityLogs'));
 
 // Health check
 app.get('/api/health', (req, res) => {
