@@ -26,25 +26,32 @@ const ensureProfileTable = async () => {
 };
 
 const ensureAdmissionTable = async () => {
-  // สร้าง table ถ้ายังไม่มี (UNIQUE per combination ไม่ใช่ per student_code)
+  // สร้าง table ถ้ายังไม่มี
   await db.query(`
     CREATE TABLE IF NOT EXISTS \`student_admissions\` (
       \`id\` INT AUTO_INCREMENT PRIMARY KEY,
       \`student_code\` VARCHAR(20) NOT NULL,
       \`university_id\` INT NOT NULL,
-      \`faculty_id\` INT NOT NULL,
       \`program_id\` INT NOT NULL,
       \`confirmed\` TINYINT(1) NOT NULL DEFAULT 0,
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY \`uq_student_program\` (\`student_code\`, \`university_id\`, \`faculty_id\`, \`program_id\`)
+      UNIQUE KEY \`uq_student_program\` (\`student_code\`, \`program_id\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
-  // Migration: ถ้ามี index เก่าที่ unique บน student_code อย่างเดียว ให้ลบออก
-  try { await db.query(`ALTER TABLE student_admissions DROP INDEX uq_student_admission`); } catch {}
-  try {
-    await db.query(`ALTER TABLE student_admissions ADD UNIQUE KEY uq_student_program (student_code, university_id, faculty_id, program_id)`);
-  } catch {}
+  // Migration: เพิ่ม/ปรับ columns
+  const [cols] = await db.query(`
+    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'student_admissions'
+  `);
+  const colNames = cols.map(c => c.COLUMN_NAME);
+  if (colNames.includes('faculty_id')) {
+    // ลบ unique key เก่าที่มี faculty_id
+    try { await db.query(`ALTER TABLE student_admissions DROP INDEX uq_student_program`); } catch {}
+    try { await db.query(`ALTER TABLE student_admissions DROP INDEX uq_student_admission`); } catch {}
+    try { await db.query(`ALTER TABLE student_admissions DROP COLUMN faculty_id`); } catch {}
+    try { await db.query(`ALTER TABLE student_admissions ADD UNIQUE KEY uq_student_program (student_code, program_id)`); } catch {}
+  }
 };
 
 // ─── Multer: อัปโหลดรูปนักเรียน ──────────────────────────────────────────────
@@ -297,13 +304,13 @@ router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
     await ensureAdmissionTable();
     const code = req.user.student_code;
     const [rows] = await db.query(
-      `SELECT sa.id, sa.university_id, sa.faculty_id, sa.program_id, sa.confirmed,
-              u.name_th AS university_name, u.logo_url,
-              f.name_th AS faculty_name,
-              p.program_name_th AS program_name
+      `SELECT sa.id, sa.confirmed,
+              u.id AS university_id, u.name_th AS university_name, u.logo_url,
+              p.id AS program_id,
+              p.campus, p.faculty_name, p.group_field,
+              p.field_name_th, p.program_name_th, p.program_type
        FROM student_admissions sa
        JOIN universities u ON u.id = sa.university_id
-       JOIN faculties f ON f.id = sa.faculty_id
        JOIN programs p ON p.id = sa.program_id
        WHERE sa.student_code = ?
        ORDER BY sa.confirmed DESC, sa.created_at ASC`,
@@ -321,10 +328,15 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
   try {
     await ensureAdmissionTable();
     const code = req.user.student_code;
-    const { university_id, faculty_id, program_id } = req.body;
-    if (!university_id || !faculty_id || !program_id) {
-      return res.status(400).json({ message: 'กรุณาเลือกมหาวิทยาลัย คณะ และสาขาให้ครบ' });
+    const { program_id } = req.body;
+    if (!program_id) {
+      return res.status(400).json({ message: 'กรุณาเลือกหลักสูตรให้ครบ' });
     }
+    // ดึง university_id จาก program
+    const [[prog]] = await db.query('SELECT university_id FROM programs WHERE id = ? LIMIT 1', [program_id]);
+    if (!prog) return res.status(404).json({ message: 'ไม่พบหลักสูตรนี้' });
+    const university_id = prog.university_id;
+
     // ถ้ายืนยันสิทธิ์แล้ว ห้ามเพิ่ม
     const [[confirmed]] = await db.query(
       'SELECT id FROM student_admissions WHERE student_code = ? AND confirmed = 1 LIMIT 1', [code]
@@ -332,13 +344,13 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
     if (confirmed) return res.status(400).json({ message: 'ยืนยันสิทธิ์แล้ว ไม่สามารถเพิ่มได้' });
 
     await db.query(
-      `INSERT INTO student_admissions (student_code, university_id, faculty_id, program_id)
-       VALUES (?, ?, ?, ?)`,
-      [code, university_id, faculty_id, program_id]
+      `INSERT INTO student_admissions (student_code, university_id, program_id)
+       VALUES (?, ?, ?)`,
+      [code, university_id, program_id]
     );
     // log
     const [[uniRow]] = await db.query('SELECT name_th AS name FROM universities WHERE id = ? LIMIT 1', [university_id]).catch(() => [[null]]);
-    logActivity({ username: code, name: '', role: 'student', action: 'add_admission', target: uniRow?.name || String(university_id), detail: { university_id, faculty_id, program_id } });
+    logActivity({ username: code, name: '', role: 'student', action: 'add_admission', target: uniRow?.name || String(university_id), detail: { university_id, program_id } });
     res.json({ message: 'เพิ่มแล้ว' });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {

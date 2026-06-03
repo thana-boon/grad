@@ -132,17 +132,37 @@ const ensureTables = async () => {
     await db.query(`
       CREATE TABLE IF NOT EXISTS \`programs\` (
         \`id\`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        \`faculty_id\`      INT UNSIGNED NOT NULL,
-        \`campus\`          VARCHAR(100) DEFAULT NULL,
-        \`group_field\`     VARCHAR(100) DEFAULT NULL,
+        \`university_id\`   INT UNSIGNED NOT NULL,
+        \`faculty_id\`      INT UNSIGNED DEFAULT NULL,
+        \`campus\`          VARCHAR(255) DEFAULT NULL,
+        \`faculty_name\`    VARCHAR(255) DEFAULT NULL,
+        \`group_field\`     VARCHAR(255) DEFAULT NULL,
         \`field_name_th\`   VARCHAR(255) DEFAULT NULL,
-        \`field_name_en\`   VARCHAR(255) DEFAULT NULL,
         \`program_name_th\` VARCHAR(500) NOT NULL,
-        \`program_name_en\` VARCHAR(500) DEFAULT NULL,
-        \`program_type\`    VARCHAR(50)  DEFAULT NULL,
+        \`program_type\`    VARCHAR(100) DEFAULT NULL,
         \`created_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+  } else {
+    // Migration: add new columns if missing, make faculty_id nullable
+    const [latestCols] = await db.query(`
+      SELECT COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'programs'
+    `);
+    const latestColMap = Object.fromEntries(latestCols.map(c => [c.COLUMN_NAME, c]));
+
+    // Make faculty_id nullable (required for new import that doesn't use faculties FK)
+    if (latestColMap['faculty_id'] && latestColMap['faculty_id'].IS_NULLABLE === 'NO') {
+      await db.query('ALTER TABLE `programs` MODIFY COLUMN `faculty_id` INT UNSIGNED DEFAULT NULL').catch(() => {});
+    }
+    if (!latestColMap['university_id']) {
+      await db.query('ALTER TABLE `programs` ADD COLUMN `university_id` INT UNSIGNED DEFAULT NULL AFTER `id`');
+      await db.query(`UPDATE \`programs\` p JOIN \`faculties\` f ON f.id = p.faculty_id SET p.university_id = f.university_id`).catch(() => {});
+    }
+    if (!latestColMap['faculty_name']) {
+      await db.query('ALTER TABLE `programs` ADD COLUMN `faculty_name` VARCHAR(255) DEFAULT NULL AFTER `university_id`');
+      await db.query(`UPDATE \`programs\` p JOIN \`faculties\` f ON f.id = p.faculty_id SET p.faculty_name = f.name_th`).catch(() => {});
+    }
   }
 };
 
@@ -268,12 +288,96 @@ router.delete('/:id', verifyToken, adminOnly, async (req, res) => {
   }
 });
 
+// ─── GET /api/universities/sample-excel ──────────────────────────────────
+// ดาวน์โหลดไฟล์ตัวอย่างสำหรับ Import Excel
+router.get('/sample-excel', verifyToken, adminOnly, (req, res) => {
+  try {
+    const sampleData = [
+      {
+        university_type_name_th: 'ทปอ.',
+        university_name_th:      'มหาวิทยาลัยตัวอย่าง',
+        campus_name_th:          'วิทยาเขตหลัก',
+        faculty_name_th:         'คณะวิศวกรรมศาสตร์',
+        group_field_th:          'วิศวกรรมศาสตร์',
+        field_name_th:           'วิศวกรรมคอมพิวเตอร์',
+        program_name_th:         'หลักสูตรวิศวกรรมศาสตรบัณฑิต สาขาวิชาวิศวกรรมคอมพิวเตอร์',
+        program_type_name_th:    'ภาษาไทย ปกติ',
+      },
+      {
+        university_type_name_th: 'ทปอ.',
+        university_name_th:      'มหาวิทยาลัยตัวอย่าง',
+        campus_name_th:          'วิทยาเขตหลัก',
+        faculty_name_th:         'คณะวิศวกรรมศาสตร์',
+        group_field_th:          'วิศวกรรมศาสตร์',
+        field_name_th:           'วิศวกรรมคอมพิวเตอร์',
+        program_name_th:         'หลักสูตรวิศวกรรมศาสตรบัณฑิต สาขาวิชาวิศวกรรมคอมพิวเตอร์',
+        program_type_name_th:    'นานาชาติ',
+      },
+      {
+        university_type_name_th: 'ทปอ.',
+        university_name_th:      'มหาวิทยาลัยตัวอย่าง',
+        campus_name_th:          'วิทยาเขตหลัก',
+        faculty_name_th:         'คณะวิทยาศาสตร์',
+        group_field_th:          'วิทยาศาสตร์',
+        field_name_th:           'ฟิสิกส์',
+        program_name_th:         'หลักสูตรวิทยาศาสตรบัณฑิต สาขาวิชาฟิสิกส์',
+        program_type_name_th:    'ภาษาไทย ปกติ',
+      },
+      {
+        university_type_name_th: 'ราชภัฏ',
+        university_name_th:      'มหาวิทยาลัยราชภัฏตัวอย่าง',
+        campus_name_th:          'วิทยาเขตหลัก',
+        faculty_name_th:         'คณะครุศาสตร์',
+        group_field_th:          'ครุศาสตร์/ศึกษาศาสตร์',
+        field_name_th:           'การศึกษาปฐมวัย',
+        program_name_th:         'หลักสูตรครุศาสตรบัณฑิต สาขาวิชาการศึกษาปฐมวัย',
+        program_type_name_th:    'ภาษาไทย ปกติ',
+      },
+      {
+        university_type_name_th: 'เอกชน',
+        university_name_th:      'มหาวิทยาลัยเอกชนตัวอย่าง',
+        campus_name_th:          'วิทยาเขตหลัก',
+        faculty_name_th:         'คณะบริหารธุรกิจ',
+        group_field_th:          'บริหารธุรกิจ',
+        field_name_th:           'การตลาด',
+        program_name_th:         'หลักสูตรบริหารธุรกิจบัณฑิต สาขาวิชาการตลาด',
+        program_type_name_th:    'ภาษาไทย ปกติ',
+      },
+    ];
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(sampleData, {
+      header: [
+        'university_type_name_th',
+        'university_name_th',
+        'campus_name_th',
+        'faculty_name_th',
+        'group_field_th',
+        'field_name_th',
+        'program_name_th',
+        'program_type_name_th',
+      ],
+    });
+    // Column widths
+    ws['!cols'] = [
+      { wch: 20 }, { wch: 30 }, { wch: 25 }, { wch: 30 },
+      { wch: 25 }, { wch: 30 }, { wch: 70 }, { wch: 20 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'courses');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="university_import_sample.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buf);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── POST /api/universities/import-excel ─────────────────────────────────
 // ล้างข้อมูลเดิมทั้งหมด แล้ว import จาก Excel
-// columns: university_type_name_th, university_name_th, university_name_en,
-//          campus_name_th, faculty_name_th, faculty_name_en,
-//          group_field_th, field_name_th, field_name_en,
-//          program_name_th, program_name_en, program_type_name_th
+// columns: university_type_name_th, university_name_th, campus_name_th,
+//          faculty_name_th, group_field_th, field_name_th,
+//          program_name_th, program_type_name_th
 router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
   excelUpload(req, res, async (uploadErr) => {
     if (uploadErr) return res.status(400).json({ message: uploadErr.message });
@@ -285,42 +389,38 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
       // Parse Excel
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws);
+      const rawRows = XLSX.utils.sheet_to_json(ws);
 
-      if (rows.length === 0) return res.status(400).json({ message: 'ไฟล์ว่างเปล่า' });
+      if (rawRows.length === 0) return res.status(400).json({ message: 'ไฟล์ว่างเปล่า' });
 
       const requiredCols = ['university_name_th', 'faculty_name_th', 'program_name_th'];
       for (const col of requiredCols) {
-        if (!(col in rows[0])) return res.status(400).json({ message: `ไม่พบคอลัมน์ "${col}" ในไฟล์` });
+        if (!(col in rawRows[0])) return res.status(400).json({ message: `ไม่พบคอลัมน์ "${col}" ในไฟล์` });
       }
 
-      // ── ตรวจสอบสาขาซ้ำใน Excel ก่อน import ─────────────────────────
+      const totalRaw = rawRows.length;
+      const rows = rawRows;
+
+      // ── กำจัดแถวซ้ำใน Excel ก่อน import (dedup แทน block) ──────────
       {
         const seen = new Set();
-        let dupCount = 0;
-        const dupExamples = [];
+        const deduped = [];
         for (const r of rows) {
           const uniName  = (r.university_name_th  || '').trim();
           const facName  = (r.faculty_name_th      || '').trim();
-          const progName = (r.program_name_th      || '').trim();
           const campus   = (r.campus_name_th       || '').trim();
+          const field    = (r.field_name_th        || '').trim();
+          const progName = (r.program_name_th      || '').trim();
           const progType = (r.program_type_name_th || '').trim();
           if (!uniName || !facName || !progName) continue;
-          const key = `${uniName}::${facName}::${campus}::${progName}::${progType}`;
-          if (seen.has(key)) {
-            dupCount++;
-            if (dupExamples.length < 5) dupExamples.push({ university: uniName, faculty: facName, program: progName, campus: campus || '-', type: progType || '-' });
-          } else {
+          const key = `${uniName}::${campus}::${facName}::${field}::${progName}::${progType}`;
+          if (!seen.has(key)) {
             seen.add(key);
+            deduped.push(r);
           }
         }
-        if (dupCount > 0) {
-          return res.status(400).json({
-            message: `พบสาขาซ้ำในไฟล์ Excel จำนวน ${dupCount} รายการ — ไม่สามารถ import ได้ กรุณาแก้ไขไฟล์ก่อน`,
-            duplicateCount: dupCount,
-            examples: dupExamples,
-          });
-        }
+        // replace rows with deduped list
+        rows.splice(0, rows.length, ...deduped);
       }
 
       // ล้าง logo files เดิม
@@ -339,7 +439,7 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
       await db.query('ALTER TABLE `universities` AUTO_INCREMENT = 1');
 
       // ── Build university list (deduplicate) ───────────────────────────
-      const uniMap = new Map(); // name_th → id (ใส่หลัง insert)
+      const uniMap = new Map(); // name_th → id
       const uniOrder = [];
       for (const r of rows) {
         const name_th = (r.university_name_th || '').trim();
@@ -347,77 +447,46 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
         uniMap.set(name_th, null);
         uniOrder.push({
           name_th,
-          name_en: (r.university_name_en || '').trim() || null,
           university_type: (r.university_type_name_th || '').trim() || null,
         });
       }
 
       for (const u of uniOrder) {
         const [result] = await db.query(
-          'INSERT INTO `universities` (name_th, name_en, university_type) VALUES (?, ?, ?)',
-          [u.name_th, u.name_en, u.university_type]
+          'INSERT INTO `universities` (name_th, university_type) VALUES (?, ?)',
+          [u.name_th, u.university_type]
         );
         uniMap.set(u.name_th, result.insertId);
       }
 
-      // ── Build faculty list (deduplicate per university) ───────────────
-      const facMap = new Map(); // `${uniId}::${name_th}` → id
-      const facOrder = [];
-      for (const r of rows) {
-        const uniName = (r.university_name_th || '').trim();
-        const facName = (r.faculty_name_th || '').trim();
-        if (!uniName || !facName) continue;
-        const uniId = uniMap.get(uniName);
-        if (!uniId) continue;
-        const key = `${uniId}::${facName}`;
-        if (facMap.has(key)) continue;
-        facMap.set(key, null);
-        facOrder.push({
-          university_id: uniId,
-          name_th: facName,
-          name_en: (r.faculty_name_en || '').trim() || null,
-        });
-      }
-
-      for (const f of facOrder) {
-        const [result] = await db.query(
-          'INSERT INTO `faculties` (university_id, name_th, name_en) VALUES (?, ?, ?)',
-          [f.university_id, f.name_th, f.name_en]
-        );
-        facMap.set(`${f.university_id}::${f.name_th}`, result.insertId);
-      }
-
-      // ── Insert programs ───────────────────────────────────────────────
+      // ── Insert programs (flat, university_id stored directly) ─────────
       let programCount = 0;
       const progInserts = [];
       for (const r of rows) {
-        const uniName = (r.university_name_th || '').trim();
-        const facName = (r.faculty_name_th || '').trim();
-        const progName = (r.program_name_th || '').trim();
+        const uniName  = (r.university_name_th      || '').trim();
+        const facName  = (r.faculty_name_th          || '').trim();
+        const progName = (r.program_name_th          || '').trim();
         if (!uniName || !facName || !progName) continue;
         const uniId = uniMap.get(uniName);
         if (!uniId) continue;
-        const facId = facMap.get(`${uniId}::${facName}`);
-        if (!facId) continue;
         progInserts.push([
-          facId,
-          (r.campus_name_th || '').trim() || null,
-          (r.group_field_th || '').trim() || null,
-          (r.field_name_th || '').trim() || null,
-          (r.field_name_en || '').trim() || null,
+          uniId,
+          (r.campus_name_th      || '').trim() || null,
+          facName,
+          (r.group_field_th      || '').trim() || null,
+          (r.field_name_th       || '').trim() || null,
           progName,
-          (r.program_name_en || '').trim() || null,
           (r.program_type_name_th || '').trim() || null,
         ]);
       }
 
-      // Batch insert programs (chunks of 100)
-      const CHUNK = 100;
+      // Batch insert programs (chunks of 200)
+      const CHUNK = 200;
       for (let i = 0; i < progInserts.length; i += CHUNK) {
         const chunk = progInserts.slice(i, i + CHUNK);
         const [result] = await db.query(
           `INSERT INTO \`programs\`
-           (faculty_id, campus, group_field, field_name_th, field_name_en, program_name_th, program_name_en, program_type)
+           (university_id, campus, faculty_name, group_field, field_name_th, program_name_th, program_type)
            VALUES ?`,
           [chunk]
         );
@@ -425,10 +494,11 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
       }
 
       res.json({
-        message: 'Import Excel สำเร็จ',
+        message: `Import Excel สำเร็จ`,
         universities: uniOrder.length,
-        faculties: facOrder.length,
+        faculties: 0,
         programs: programCount,
+        skippedDuplicates: totalRaw - rows.length,
       });
     } catch (err) {
       res.status(500).json({ message: err.message });
@@ -585,44 +655,137 @@ router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
       return page?.thumbnail?.source || null;
     };
 
+    // ── helper: ดึง URL จริงของ File: ผ่าน imageinfo (400px thumb) ──────────
+    const getFileUrl = async (lang, filename) => {
+      try {
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=File:${encodeURIComponent(filename)}&prop=imageinfo&iiprop=url&iiurlwidth=400&format=json`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(8000) });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const p = Object.values(data?.query?.pages || {})[0];
+        return p?.imageinfo?.[0]?.thumburl || p?.imageinfo?.[0]?.url || null;
+      } catch { return null; }
+    };
+
+    // ── helper: ไฟล์ที่ไม่ใช่โลโก้ (generic icons) ────────────────────────
+    const GENERIC = /^(flag of|commons-logo|wiki letter|information icon|diploma|edit-|sound-|question|yes icon|no icon|ambox|nuvola|crystal|ไฟล์:flag|speaker|loudspeaker|thai.*provinces|amphoe)/i;
+    // keywords ที่บ่งบอกว่าเป็นโลโก้/ตรา
+    const LOGO_KW  = /logo|emblem|crest|coat|ตรา|ตราสัญลักษณ์|badge|monogram/i;
+    // keywords ที่บ่งบอกว่าเป็นของมหาวิทยาลัย
+    const UNI_KW   = /university|rajabhat|rajamangala|kmutt|kmitl|rmutt|rmut|walailak|burapha|ubon|silpakorn|dusit|stamford|rangsit|siam|kku|cmu|cru|crru|kmutnb|snru|psru|skru|nru|pkru|ssru|vru|mcru|nsru|cpru|udru|ybru|nkrafa|yru/i;
+
+    // ── helper: เลือกโลโก้ที่ดีที่สุดจาก images list ──────────────────────
+    const pickBestLogoFile = (images = []) => {
+      const scored = images
+        .map(img => {
+          const name = img.replace(/^(?:ไฟล์:|File:|Image:)/i, '').trim();
+          if (GENERIC.test(name)) return null;
+          // ตัดนามสกุลมาตรวจ
+          const isSvg = /\.svg$/i.test(name);
+          const isPng = /\.png$/i.test(name);
+          const hasLogo = LOGO_KW.test(name);
+          const hasUni  = UNI_KW.test(name);
+          const hasSeal = /seal/i.test(name);
+
+          let score = 0;
+          if (hasLogo && hasUni) score += 12; // ดีสุด: logo + ชื่อมหาลัย
+          else if (hasLogo)      score += 8;  // logo keyword แต่ไม่รู้ว่าของมหาลัย
+          else if (hasUni)       score += 6;  // มีชื่อมหาลัยในไฟล์ → น่าจะโลโก้
+          else if (hasSeal)      score += 3;  // seal ล้วนๆ → อาจเป็นตราจังหวัด
+          if (score === 0) return null;        // ไม่มี keyword เลย ข้าม
+          if (isSvg) score += 2;
+          if (isPng) score += 1;
+          return { name, score };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score);
+      return scored[0] ? scored[0].name : null;
+    };
+
+    // ── helper: ดึงโลโก้จาก Wikipedia page (pageimages → infobox image → images list) ─
+    const getLogoFromPage = async (lang, title) => {
+      try {
+        // ดึง pageimages + images + revisions ในคำขอเดียว
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages|images|revisions&pithumbsize=400&imlimit=30&rvprop=content&rvslots=main&format=json&redirects=1`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(12000) });
+        if (!r.ok) return null;
+        const data = await r.json();
+        const page = Object.values(data?.query?.pages || {})[0];
+        if (!page || page.missing !== undefined) return null;
+
+        // 1. pageimages thumbnail (ถ้ามี)
+        const thumb = page?.thumbnail?.source;
+        if (thumb) return thumb;
+
+        // 2. infobox: อ่าน field image/ตรา/logo จาก wikitext
+        const wikitext = page?.revisions?.[0]?.slots?.main?.['*'] || page?.revisions?.[0]?.['*'] || '';
+        if (wikitext) {
+          const m = wikitext.match(/\|\s*(?:image|ตรา|ตราสัญลักษณ์|logo_university|logo|image_name|รูปภาพ)\s*=\s*([^\n|{}<>]+)/i);
+          if (m) {
+            let f = m[1].trim()
+              .replace(/^\[\[(?:ไฟล์:|File:|Image:)?/i, '')
+              .replace(/\]\].*$/, '').replace(/\|.*$/, '')
+              .replace(/\.(svg|png|jpg|jpeg)\s.*/i, (_, ext) => '.' + ext)
+              .trim();
+            if (f && /\.(svg|png|jpg|jpeg)$/i.test(f)) {
+              const fileUrl = await getFileUrl(lang, f);
+              if (fileUrl) return fileUrl;
+            }
+          }
+        }
+
+        // 3. images list: เลือกไฟล์ที่ score สูงสุด
+        const imgTitles = (page?.images || []).map(i => i.title || '');
+        const best = pickBestLogoFile(imgTitles);
+        if (best) {
+          const fileUrl = await getFileUrl(lang, best);
+          if (fileUrl) return fileUrl;
+        }
+
+        return null;
+      } catch { return null; }
+    };
+
+    // ── helper: หา Wikipedia page title (direct → search) ─────────────────
+    const findTitle = async (lang, query) => {
+      try {
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(query)}&prop=info&format=json&redirects=1`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(6000) });
+        if (r.ok) {
+          const data = await r.json();
+          const page = Object.values(data?.query?.pages || {})[0];
+          if (page && page.missing === undefined) {
+            return data?.query?.redirects?.slice(-1)[0]?.to || query;
+          }
+        }
+      } catch {}
+      try {
+        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=0&srlimit=1&format=json`;
+        const r = await fetch(url, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(8000) });
+        if (r.ok) {
+          const data = await r.json();
+          return data?.query?.search?.[0]?.title || null;
+        }
+      } catch {}
+      return null;
+    };
+
     // ── helper: ค้นหา Wikipedia ด้วย Search API แล้วเอา pageimages ────────
     const searchWikiImg = async (lang, query) => {
       try {
-        // Step 1: search หา title ที่ใกล้เคียงที่สุด
         const searchUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srnamespace=0&srlimit=1&format=json`;
-        const sr = await fetch(searchUrl, {
-          headers: { 'User-Agent': 'GradTrackBot/1.0' },
-          signal: AbortSignal.timeout(8000),
-        });
+        const sr = await fetch(searchUrl, { headers: { 'User-Agent': 'GradTrackBot/1.0' }, signal: AbortSignal.timeout(8000) });
         if (!sr.ok) return null;
         const srData = await sr.json();
         const title = srData?.query?.search?.[0]?.title;
         if (!title) return null;
-
-        // Step 2: เอา pageimages จาก title ที่หาได้
-        const imgUrl = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&redirects=1`;
-        const ir = await fetch(imgUrl, {
-          headers: { 'User-Agent': 'GradTrackBot/1.0' },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!ir.ok) return null;
-        const irData = await ir.json();
-        return getImgFromWikiPage(irData?.query?.pages || {});
+        return await getLogoFromPage(lang, title);
       } catch { return null; }
     };
 
     // ── helper: direct lookup ด้วยชื่อแน่นอน ──────────────────────────────
     const directWikiImg = async (lang, title) => {
-      try {
-        const url = `https://${lang}.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&redirects=1`;
-        const r = await fetch(url, {
-          headers: { 'User-Agent': 'GradTrackBot/1.0' },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!r.ok) return null;
-        const data = await r.json();
-        return getImgFromWikiPage(data?.query?.pages || {});
-      } catch { return null; }
+      return await getLogoFromPage(lang, title);
     };
 
     // ── helper: download & save image ─────────────────────────────────────
@@ -633,8 +796,13 @@ router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
       });
       if (!imgRes.ok) return false;
       const ct = imgRes.headers.get('content-type') || '';
-      if (ct.includes('svg') || ct.includes('text')) return false;
-      const ext = ct.includes('png') ? '.png' : '.jpg';
+      if (ct.includes('text/html') || ct.includes('text/plain')) return false;
+
+      let ext;
+      if (ct.includes('svg'))  ext = '.svg';
+      else if (ct.includes('png')) ext = '.png';
+      else if (ct.includes('webp')) ext = '.webp';
+      else ext = '.jpg';
       const filename = `logo-wiki-${uniId}-${Date.now()}${ext}`;
       const filepath = path.join(LOGO_DIR, filename);
 
@@ -655,29 +823,22 @@ router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
       try {
         let imgUrl = null;
 
-        // 1. Direct lookup ชื่อไทย (เร็วสุด ถ้าชื่อตรง)
-        imgUrl = await directWikiImg('th', uni.name_th);
+        // 1. Direct lookup ชื่อไทย
+        imgUrl = await getLogoFromPage('th', uni.name_th);
 
-        // 2. Search API ชื่อไทย (fuzzy)
+        // 2. Search ชื่อไทย (ถ้าตรงๆ fail)
         if (!imgUrl) imgUrl = await searchWikiImg('th', uni.name_th);
 
-        // 3. Search API ชื่อย่อ + "มหาวิทยาลัย"
-        if (!imgUrl && uni.short_name) {
-          imgUrl = await searchWikiImg('th', `มหาวิทยาลัย ${uni.short_name}`);
-        }
-
-        // 4. Fallback: Wikipedia English ด้วยชื่ออังกฤษ
-        if (!imgUrl && uni.name_en) {
-          imgUrl = await directWikiImg('en', uni.name_en);
-          if (!imgUrl) imgUrl = await searchWikiImg('en', uni.name_en);
-        }
-
-        // 5. ตัด "มหาวิทยาลัย" / "สถาบัน" / "วิทยาลัย" หน้าออก แล้วค้นส่วนที่เหลือ
+        // 3. ตัดคำนำหน้า แล้วค้น
         if (!imgUrl) {
           const stripped = uni.name_th.replace(/^(มหาวิทยาลัย|สถาบัน|วิทยาลัย)\s*/u, '').trim();
-          if (stripped && stripped !== uni.name_th) {
-            imgUrl = await searchWikiImg('th', stripped);
-          }
+          if (stripped !== uni.name_th) imgUrl = await searchWikiImg('th', stripped);
+        }
+
+        // 4. Fallback: Wikipedia ภาษาอังกฤษ
+        if (!imgUrl && uni.name_en) {
+          imgUrl = await getLogoFromPage('en', uni.name_en);
+          if (!imgUrl) imgUrl = await searchWikiImg('en', uni.name_en);
         }
 
         if (!imgUrl) return;

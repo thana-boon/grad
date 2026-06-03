@@ -41,11 +41,6 @@ export default function UniversitiesPage() {
   const [syncResult, setSyncResult] = useState(null);
   const [syncConfirm, setSyncConfirm] = useState(false); // false | 'missing' | 'all'
 
-  // Sync from Wikipedia
-  const [wikiSyncing, setWikiSyncing] = useState(false); // 'unis' | 'faculties' | 'programs' | null
-  const [wikiSyncResult, setWikiSyncResult] = useState(null);
-  const [wikiSyncConfirm, setWikiSyncConfirm] = useState(null); // null | 'unis' | 'faculties' | 'programs'
-
   const fileRef = useRef(null);
   const excelRef = useRef(null);
 
@@ -91,14 +86,14 @@ export default function UniversitiesPage() {
 
   const openCreate = () => {
     setEditTarget(null);
-    setForm({ name: '', short_name: '', logo_url: '' });
+    setForm({ name: '', short_name: '', logo_url: '', university_type: '' });
     setLogoFile(null); setLogoPreview(''); setFormError('');
     setModalOpen(true);
   };
 
   const openEdit = (u) => {
     setEditTarget(u);
-    setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '' });
+    setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '', university_type: u.university_type || '' });
     setLogoFile(null); setLogoPreview(u.logo_url || ''); setFormError('');
     setModalOpen(true);
   };
@@ -111,6 +106,7 @@ export default function UniversitiesPage() {
       const fd = new FormData();
       fd.append('name', form.name.trim());
       fd.append('short_name', form.short_name.trim());
+      fd.append('university_type', form.university_type.trim());
       if (logoFile) fd.append('logo', logoFile);
       else fd.append('logo_url', form.logo_url.trim());
 
@@ -185,51 +181,16 @@ export default function UniversitiesPage() {
           <h2 className="text-lg font-semibold">🏛️ มหาวิทยาลัย</h2>
           <p className="text-xs text-base-content/50">จัดการรายชื่อมหาวิทยาลัย · โลโก้ · นำเข้าจาก Excel</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {/* Sync from Wikipedia (unis + faculties) */}
-          <button
-            className="btn btn-outline btn-sm gap-1"
-            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('unis'); }}
-            disabled={!!wikiSyncing || syncing || importing || clearing}
-          >
-            {wikiSyncing === 'unis' ? <span className="loading loading-spinner loading-xs" /> : '🏛️'}
-            ซิงค์มหาลัย
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Primary action */}
+          <button className="btn btn-primary btn-sm gap-1" onClick={openCreate}>
+            ➕ เพิ่มเอง
           </button>
-          <button
-            className="btn btn-outline btn-sm gap-1"
-            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('faculties'); }}
-            disabled={!!wikiSyncing || syncing || importing || clearing}
-          >
-            {wikiSyncing === 'faculties' ? <span className="loading loading-spinner loading-xs" /> : '🏫'}
-            ซิงค์คณะ
-          </button>
-          <button
-            className="btn btn-outline btn-sm gap-1"
-            onClick={() => { setWikiSyncResult(null); setWikiSyncConfirm('programs'); }}
-            disabled={!!wikiSyncing || syncing || importing || clearing}
-          >
-            {wikiSyncing === 'programs' ? <span className="loading loading-spinner loading-xs" /> : '📚'}
-            ซิงค์หลักสูตร
-          </button>
-          {/* Sync Logos */}
-          <button
-            className="btn btn-outline btn-sm gap-1"
-            onClick={() => { setSyncResult(null); setSyncConfirm('missing'); }}
-            disabled={syncing || !!wikiSyncing || importing || clearing}
-          >
-            {syncing ? <span className="loading loading-spinner loading-xs" /> : '🖼️'}
-            ซิงค์โลโก้
-          </button>
-          {/* Clear All */}
-          <button
-            className="btn btn-error btn-outline btn-sm gap-1"
-            onClick={() => setClearConfirm(true)}
-            disabled={clearing || importing || syncing}
-          >
-            {clearing ? <span className="loading loading-spinner loading-xs" /> : '🗑️'}
-            ล้างข้อมูล
-          </button>
-          {/* Import Excel */}
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-base-300" />
+
+          {/* Import group */}
           <input ref={excelRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
           <button
             className="btn btn-outline btn-sm gap-1"
@@ -239,19 +200,41 @@ export default function UniversitiesPage() {
             {importing ? <span className="loading loading-spinner loading-xs" /> : '📥'}
             Import Excel
           </button>
-          <button className="btn btn-primary btn-sm gap-1" onClick={openCreate}>
-            ➕ เพิ่มเอง
+          <a
+            href="/api/universities/sample-excel"
+            download
+            className="btn btn-ghost btn-sm gap-1 text-base-content/60"
+          >
+            📋 ตัวอย่าง Excel
+          </a>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-base-300" />
+
+          {/* Utility */}
+          <button
+            className="btn btn-ghost btn-sm gap-1"
+            onClick={() => { setSyncResult(null); setSyncConfirm('missing'); }}
+            disabled={syncing || importing || clearing}
+          >
+            {syncing ? <span className="loading loading-spinner loading-xs" /> : '🖼️'}
+            ซิงค์โลโก้
+          </button>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-base-300" />
+
+          {/* Danger */}
+          <button
+            className="btn btn-error btn-outline btn-sm gap-1"
+            onClick={() => setClearConfirm(true)}
+            disabled={clearing || importing || syncing}
+          >
+            {clearing ? <span className="loading loading-spinner loading-xs" /> : '🗑️'}
+            ล้างข้อมูล
           </button>
         </div>
       </div>
-
-      {/* Wiki sync result */}
-      {wikiSyncResult && (
-        <div className={`alert ${wikiSyncResult.error ? 'alert-error' : 'alert-success'} mb-4 py-3 text-sm`}>
-          <div className="flex-1"><p>{wikiSyncResult.message}</p></div>
-          <button className="btn btn-ghost btn-xs" onClick={() => setWikiSyncResult(null)}>✕</button>
-        </div>
-      )}
 
       {/* Sync result */}
       {syncResult && (
@@ -421,6 +404,24 @@ export default function UniversitiesPage() {
                   onChange={e => setForm(f => ({ ...f, short_name: e.target.value }))}
                 />
               </div>
+              {/* ประเภท */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-base-content/70">
+                  🏷️ ประเภท <span className="font-normal text-base-content/40">(ไม่บังคับ)</span>
+                </label>
+                <select
+                  className="select select-bordered select-sm"
+                  value={form.university_type}
+                  onChange={e => setForm(f => ({ ...f, university_type: e.target.value }))}
+                >
+                  <option value="">— ไม่ระบุ —</option>
+                  <option value="ทปอ.">ทปอ. (มหาวิทยาลัยรัฐ)</option>
+                  <option value="ราชภัฏ">ราชภัฏ</option>
+                  <option value="ราชมงคล">ราชมงคล</option>
+                  <option value="เอกชน">เอกชน</option>
+                  <option value="สมทบ">สมทบ</option>
+                </select>
+              </div>
               {formError && <div className="alert alert-error py-2 text-xs">⚠️ {formError}</div>}
               <div className="modal-action mt-1">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>ยกเลิก</button>
@@ -451,75 +452,6 @@ export default function UniversitiesPage() {
             </div>
           </div>
           <div className="modal-backdrop" onClick={() => setDeleteTarget(null)} />
-        </div>
-      )}
-
-      {/* Modal Wiki Sync Confirm */}
-      {wikiSyncConfirm && (
-        <div className="modal modal-open">
-          <div className="modal-box max-w-sm">
-            <h3 className="font-bold text-lg">
-              {wikiSyncConfirm === 'unis' ? '🏛️ ซิงค์รายชื่อมหาวิทยาลัย'
-               : wikiSyncConfirm === 'faculties' ? '🏫 ซิงค์คณะ'
-               : '📚 ซิงค์หลักสูตร/สาขาวิชา'}
-            </h3>
-            <div className="py-4 space-y-2 text-sm">
-              {wikiSyncConfirm === 'unis' ? (
-                <>
-                  <p>ดึงรายชื่อมหาวิทยาลัยจากวิกิพีเดีย</p>
-                  <p className="font-medium">รายชื่อมหาวิทยาลัยในประเทศไทย</p>
-                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
-                    <li>เพิ่มเฉพาะมหาวิทยาลัยที่ยังไม่มีในระบบ</li>
-                    <li>ดึงชื่ออังกฤษ ชื่อย่อ ประเภท และโลโก้ด้วย</li>
-                    <li>ไม่แตะข้อมูลที่มีอยู่แล้ว</li>
-                  </ul>
-                </>
-              ) : wikiSyncConfirm === 'faculties' ? (
-                <>
-                  <p>ดึงรายชื่อคณะจากหน้าวิกิพีเดียของแต่ละมหาวิทยาลัย</p>
-                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
-                    <li>เพิ่มเฉพาะคณะที่ยังไม่มีในระบบ</li>
-                    <li>ข้อมูลบางมหาลัยอาจไม่ครบจาก Wikipedia</li>
-                  </ul>
-                </>
-              ) : (
-                <>
-                  <p>ดึงรายชื่อสาขาวิชา/ภาควิชาจากหน้าวิกิพีเดียของแต่ละคณะ</p>
-                  <ul className="list-disc list-inside text-base-content/70 space-y-1">
-                    <li>เพิ่มเฉพาะสาขาที่ยังไม่มีในระบบ</li>
-                    <li>บางคณะอาจไม่มีข้อมูลบน Wikipedia</li>
-                    <li>ใช้เวลานานกว่าเพราะต้องดึงทีละคณะ</li>
-                  </ul>
-                </>
-              )}
-              <p className="text-base-content/50 text-xs">อาจใช้เวลา 1-10 นาทีขึ้นอยู่กับจำนวนคณะ</p>
-            </div>
-            <div className="modal-action">
-              <button className="btn btn-ghost btn-sm" onClick={() => setWikiSyncConfirm(null)}>ยกเลิก</button>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={async () => {
-                  const type = wikiSyncConfirm;
-                  setWikiSyncConfirm(null);
-                  setWikiSyncing(type);
-                  setWikiSyncResult(null);
-                  try {
-                    const endpoint = type === 'unis' ? '/universities/sync-wiki-list'
-                      : type === 'faculties' ? '/faculties/sync-wiki'
-                      : '/faculties/sync-programs';
-                    const r = await api.post(endpoint, {}, { timeout: 600000 });
-                    setWikiSyncResult(r.data);
-                    if (type === 'unis') load();
-                  } catch (err) {
-                    setWikiSyncResult({ error: true, message: err.response?.data?.message || 'ซิงค์ไม่สำเร็จ' });
-                  } finally { setWikiSyncing(null); }
-                }}
-              >
-                {wikiSyncConfirm === 'unis' ? '🏛️' : wikiSyncConfirm === 'faculties' ? '🏫' : '📚'} เริ่มซิงค์
-              </button>
-            </div>
-          </div>
-          <div className="modal-backdrop" onClick={() => setWikiSyncConfirm(null)} />
         </div>
       )}
 
