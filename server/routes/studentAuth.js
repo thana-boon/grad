@@ -54,6 +54,21 @@ const ensureAdmissionTable = async () => {
   }
 };
 
+// ─── Multer: Excel import (memory storage) ──────────────────────────────────
+const excelUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (/\.(xlsx|xls)$/i.test(file.originalname) ||
+        file.mimetype.includes('spreadsheet') ||
+        file.mimetype.includes('excel')) {
+      cb(null, true);
+    } else {
+      cb(new Error('ไฟล์ต้องเป็น Excel (.xlsx, .xls) เท่านั้น'));
+    }
+  },
+}).single('file');
+
 // ─── Multer: อัปโหลดรูปนักเรียน ──────────────────────────────────────────────
 const PHOTO_DIR = path.join(__dirname, '..', 'uploads', 'student-photos');
 if (!fs.existsSync(PHOTO_DIR)) fs.mkdirSync(PHOTO_DIR, { recursive: true });
@@ -67,6 +82,22 @@ const photoUpload = multer({
     },
   }),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('ไฟล์ต้องเป็นรูปภาพเท่านั้น'));
+  },
+}).single('photo');
+
+const adminPhotoUpload = multer({
+  storage: multer.diskStorage({
+    destination: PHOTO_DIR,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const code = String(req.params.student_code || 'student').replace(/[^0-9A-Za-z_-]/g, '');
+      cb(null, `student-${code}-${Date.now()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('ไฟล์ต้องเป็นรูปภาพเท่านั้น'));
@@ -108,13 +139,12 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
     let admissionMap = {};
     if (codes.length > 0) {
       const [admissions] = await db.query(
-        `SELECT sa.student_code, sa.id, sa.university_id, sa.faculty_id, sa.program_id, sa.confirmed,
+        `SELECT sa.student_code, sa.id, sa.university_id, sa.program_id, sa.confirmed, sa.created_at,
                 u.name_th AS university_name, u.logo_url,
-                f.name_th AS faculty_name,
+                p.faculty_name,
                 p.program_name_th AS program_name
          FROM student_admissions sa
          JOIN universities u ON u.id = sa.university_id
-         JOIN faculties f ON f.id = sa.faculty_id
          JOIN programs p ON p.id = sa.program_id
          WHERE sa.student_code IN (?)
          ORDER BY sa.confirmed DESC, sa.created_at ASC`,
@@ -297,6 +327,50 @@ router.post('/profile/photo', verifyToken, studentOnly, (req, res) => {
   });
 });
 
+// ─── POST /api/student/admin/students/:student_code/photo ───────────────────
+// Admin: อัปโหลดรูปให้นักเรียน
+router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req, res) => {
+  adminPhotoUpload(req, res, async (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูปภาพ' });
+
+    try {
+      await ensureProfileTable();
+      const code = String(req.params.student_code || '').trim();
+      if (!code) return res.status(400).json({ message: 'ไม่พบรหัสนักเรียน' });
+
+      let yearId = Number(req.body.year_id || 0) || 0;
+      if (!yearId) {
+        const [[stu]] = await db.query(
+          'SELECT year_id FROM school_app.students WHERE student_code = ? ORDER BY year_id DESC LIMIT 1',
+          [code]
+        );
+        yearId = Number(stu?.year_id || 0);
+      }
+
+      const photoUrl = `/uploads/student-photos/${req.file.filename}`;
+      const [[old]] = await db.query(
+        'SELECT photo_url FROM student_profiles WHERE student_code = ?', [code]
+      );
+      if (old?.photo_url?.startsWith('/uploads/student-photos/')) {
+        const oldPath = path.join(__dirname, '..', old.photo_url.replace(/^\//, ''));
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+
+      await db.query(
+        `INSERT INTO student_profiles (student_code, year_id, photo_url)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE year_id = VALUES(year_id), photo_url = VALUES(photo_url), updated_at = NOW()`,
+        [code, yearId, photoUrl]
+      );
+
+      res.json({ photo_url: photoUrl, message: 'อัปโหลดรูปสำเร็จ' });
+    } catch (err2) {
+      res.status(500).json({ message: err2.message });
+    }
+  });
+});
+
 // ─── GET /api/student/admissions ─────────────────────────────────────────────
 // ดึงรายการสอบติดทั้งหมดของนักเรียน
 router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
@@ -417,6 +491,325 @@ router.post('/admissions/:id/unconfirm', verifyToken, studentOnly, async (req, r
     await db.query('UPDATE student_admissions SET confirmed = 0 WHERE id = ?', [id]);
     logActivity({ username: code, name: '', role: 'student', action: 'unconfirm_admission', target: `admission#${id}`, detail: null });
     res.json({ message: 'ยกเลิกการยืนยันแล้ว' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── POST /api/student/admin/import-admissions ───────────────────────────────
+// Import admission data from Excel (admin only)
+router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
+  excelUpload(req, res, async (err) => {
+    if (err) return res.status(400).json({ message: err.message });
+    if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์ Excel' });
+
+    try {
+      await ensureAdmissionTable();
+
+      // Get active year from settings first, fallback to school_app
+      let activeYearId = null;
+      const [[setting]] = await db.query(
+        "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
+      );
+      if (setting?.value) activeYearId = Number(setting.value);
+      if (!activeYearId) {
+        const [activeRows] = await db.query(
+          'SELECT id FROM school_app.academic_years WHERE is_active = 1 ORDER BY id DESC LIMIT 1'
+        );
+        if (activeRows.length > 0) activeYearId = Number(activeRows[0].id);
+      }
+      if (!activeYearId) {
+        return res.status(400).json({ message: 'ยังไม่ได้ตั้งปีการศึกษา active' });
+      }
+
+      // Parse Excel
+      const XLSX = require('xlsx');
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws);
+
+      let imported = 0;
+      let skipped = 0;
+      const errors = [];
+      const warnings = [];
+
+      const pick = (obj, keys) => {
+        for (const key of keys) {
+          if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null && String(obj[key]).trim() !== '') {
+            return obj[key];
+          }
+        }
+        return null;
+      };
+
+      const parseConfirmed = (value) => {
+        if (value === true || value === 1) return 1;
+        const s = String(value || '').trim().toLowerCase();
+        return ['true', 'yes', 'y', '1', 'ยืนยัน', 'confirmed'].includes(s) ? 1 : 0;
+      };
+
+      const parseExcelDateTime = (value, XLSXRef) => {
+        if (value == null || value === '') return null;
+        if (typeof value === 'number') {
+          const dt = XLSXRef.SSF.parse_date_code(value);
+          if (!dt) return null;
+          const yyyy = String(dt.y).padStart(4, '0');
+          const mm = String(dt.m).padStart(2, '0');
+          const dd = String(dt.d).padStart(2, '0');
+          const hh = String(dt.H || 0).padStart(2, '0');
+          const mi = String(dt.M || 0).padStart(2, '0');
+          const ss = String(Math.floor(dt.S || 0)).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+        }
+        const d = new Date(value);
+        if (!isNaN(d.getTime())) {
+          return d.toISOString().slice(0, 19).replace('T', ' ');
+        }
+        return null;
+      };
+
+      for (const row of rows) {
+        try {
+          // student code - supports many column aliases
+          const rawCode = String(
+            pick(row, ['stu_id', 'student_id', 'student_code', 'เลขประจำตัว', 'รหัสนักเรียน']) || ''
+          ).trim();
+          if (!rawCode) { skipped++; continue; }
+          const paddedCode = rawCode.padStart(5, '0');
+
+          // Verify student exists in active year
+          const [students] = await db.query(
+            `SELECT student_code, first_name, last_name FROM school_app.students
+             WHERE year_id = ? AND (student_code = ? OR student_code = ?) LIMIT 1`,
+            [activeYearId, paddedCode, rawCode]
+          );
+          if (!students.length) {
+            skipped++;
+            errors.push(`ไม่พบนักเรียนรหัส ${rawCode}`);
+            continue;
+          }
+          const studentCode = students[0].student_code;
+          const displayName = `${students[0].first_name || ''} ${students[0].last_name || ''}`.trim();
+
+          // Extract all row fields early (needed for warnings too)
+          const uniName = String(
+            pick(row, ['university_name_th', 'university_name', 'university', 'มหาวิทยาลัย']) || ''
+          ).trim();
+          const facName = String(
+            pick(row, ['faculty_name_th', 'faculty_name', 'faculty', 'คณะ']) || ''
+          ).trim();
+          const progName = String(
+            pick(row, ['program_name_th', 'program_name', 'program', 'สาขา']) || ''
+          ).trim();
+
+          // confirmed flag
+          const confirmed = parseConfirmed(
+            pick(row, ['confirmation', 'confirmed', 'ยืนยันสิทธิ์', 'ยืนยัน'])
+          );
+
+          // created_at from Excel 'Created' column
+          const createdAt = parseExcelDateTime(
+            pick(row, ['Created', 'created_at', 'created', 'วันที่บันทึก']),
+            XLSX
+          );
+
+          if (!uniName) { skipped++; continue; }
+          if (!progName) { skipped++; continue; }
+
+          // Find university
+          const [unis] = await db.query(
+            'SELECT id FROM universities WHERE name_th = ? LIMIT 1',
+            [uniName]
+          );
+          if (!unis.length) {
+            skipped++;
+            warnings.push({
+              student_code: studentCode,
+              display_name: displayName,
+              university_name: uniName,
+              faculty_name: facName || null,
+              program_name: progName,
+              confirmed,
+              created_at: createdAt,
+              reason: `ไม่พบมหาวิทยาลัย "${uniName}" ในระบบ`,
+            });
+            continue;
+          }
+          const universityId = unis[0].id;
+
+          // Find program
+          const [progs] = await db.query(
+            'SELECT id FROM programs WHERE university_id = ? AND program_name_th = ? LIMIT 1',
+            [universityId, progName]
+          );
+          if (!progs.length) {
+            skipped++;
+            warnings.push({
+              student_code: studentCode,
+              display_name: displayName,
+              university_name: uniName,
+              faculty_name: facName || null,
+              program_name: progName,
+              confirmed,
+              created_at: createdAt,
+              reason: `ไม่พบหลักสูตร "${progName}" ของ "${uniName}" ในระบบ`,
+            });
+            continue;
+          }
+          const programId = progs[0].id;
+
+          // Upsert
+          if (createdAt) {
+            await db.query(
+              `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+              [studentCode, universityId, programId, confirmed, createdAt]
+            );
+          } else {
+            await db.query(
+              `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
+               VALUES (?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+              [studentCode, universityId, programId, confirmed]
+            );
+          }
+
+          imported++;
+        } catch (rowErr) {
+          skipped++;
+          const fallbackCode = pick(row, ['stu_id', 'student_id', 'student_code', 'เลขประจำตัว', 'รหัสนักเรียน']) || '-';
+          errors.push(`รหัส ${fallbackCode}: ${rowErr.message}`);
+        }
+      }
+
+      logger.info('Import admissions', { total: rows.length, imported, skipped, warnings: warnings.length });
+      res.json({ ok: true, total: rows.length, imported, skipped, errors: errors.slice(0, 50), warnings: warnings.slice(0, 100) });
+    } catch (err) {
+      logger.error('Import admissions error', { error: err.message });
+      res.status(500).json({ message: err.message });
+    }
+  });
+});
+
+// ─── POST /api/student/admin/force-import-admissions ─────────────────────────
+// Admin: force-save rows ที่ไม่พบ university/program — auto-create ถ้าจำเป็น
+router.post('/admin/force-import-admissions', verifyToken, adminOnly, async (req, res) => {
+  const { rows } = req.body;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ message: 'ไม่มีรายการให้บันทึก' });
+  }
+  try {
+    await ensureAdmissionTable();
+    let saved = 0;
+    const errors = [];
+
+    for (const row of rows) {
+      try {
+        const { student_code, university_name, faculty_name, program_name, confirmed, created_at } = row;
+        if (!student_code || !university_name || !program_name) {
+          errors.push(`ข้อมูลไม่ครบ: ${student_code || '-'}`);
+          continue;
+        }
+
+        // Find or create university
+        let [[uni]] = await db.query('SELECT id FROM universities WHERE name_th = ? LIMIT 1', [university_name]);
+        let universityId;
+        if (uni) {
+          universityId = uni.id;
+        } else {
+          const [result] = await db.query('INSERT INTO universities (name_th) VALUES (?)', [university_name]);
+          universityId = result.insertId;
+        }
+
+        // Find or create program
+        let [[prog]] = await db.query(
+          'SELECT id FROM programs WHERE university_id = ? AND program_name_th = ? LIMIT 1',
+          [universityId, program_name]
+        );
+        let programId;
+        if (prog) {
+          programId = prog.id;
+        } else {
+          const [result] = await db.query(
+            'INSERT INTO `programs` (university_id, faculty_name, program_name_th) VALUES (?, ?, ?)',
+            [universityId, faculty_name || null, program_name]
+          );
+          programId = result.insertId;
+        }
+
+        // Upsert admission
+        if (created_at) {
+          await db.query(
+            `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed, created_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+            [student_code, universityId, programId, confirmed ? 1 : 0, created_at]
+          );
+        } else {
+          await db.query(
+            `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+            [student_code, universityId, programId, confirmed ? 1 : 0]
+          );
+        }
+        saved++;
+      } catch (rowErr) {
+        errors.push(`รหัส ${row.student_code || '-'}: ${rowErr.message}`);
+      }
+    }
+
+    res.json({ ok: true, saved, errors });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── POST /api/student/admin/admissions ──────────────────────────────────────
+// Admin: เพิ่ม admission ให้นักเรียน
+router.post('/admin/admissions', verifyToken, adminOnly, async (req, res) => {
+  const { student_code, program_id, confirmed = 0 } = req.body;
+  if (!student_code || !program_id) {
+    return res.status(400).json({ message: 'ต้องระบุ student_code และ program_id' });
+  }
+  try {
+    await ensureAdmissionTable();
+    const [progs] = await db.query('SELECT id, university_id FROM `programs` WHERE id = ?', [Number(program_id)]);
+    if (!progs.length) return res.status(404).json({ message: 'ไม่พบหลักสูตรนี้' });
+    const university_id = progs[0].university_id;
+    const [result] = await db.query(
+      `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = NOW()`,
+      [student_code, university_id, Number(program_id), confirmed ? 1 : 0]
+    );
+    res.json({ id: result.insertId || null, message: 'เพิ่มข้อมูลสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── PATCH /api/student/admin/admissions/:id/confirm ─────────────────────────
+// Admin: อัปเดตสถานะยืนยัน
+router.patch('/admin/admissions/:id/confirm', verifyToken, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  const { confirmed } = req.body;
+  try {
+    await db.query('UPDATE student_admissions SET confirmed = ?, updated_at = NOW() WHERE id = ?', [confirmed ? 1 : 0, Number(id)]);
+    res.json({ message: 'อัปเดตสำเร็จ' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ─── DELETE /api/student/admin/admissions/:id ─────────────────────────────────
+// Admin: ลบ admission
+router.delete('/admin/admissions/:id', verifyToken, adminOnly, async (req, res) => {
+  const { id } = req.params;
+  try {
+    await db.query('DELETE FROM student_admissions WHERE id = ?', [Number(id)]);
+    res.json({ message: 'ลบสำเร็จ' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

@@ -38,6 +38,13 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
   const L = getUniLayout(grouped.length);
   const textColor = settings.text_color || '#ffffff';
 
+  const fullName = `${student.first_name || ''} ${student.last_name || ''}`;
+  const nameFontSize = fullName.length <= 18 ? 38
+    : fullName.length <= 22 ? 32
+    : fullName.length <= 27 ? 27
+    : fullName.length <= 33 ? 23
+    : 19;
+
   return (
     <div style={{
       width: 1080,
@@ -215,7 +222,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             </div>
 
             {/* Name */}
-            <div style={{ fontSize: 38, fontWeight: 700, textAlign: 'center', lineHeight: 1.25, color: textColor }}>
+            <div style={{ fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor }}>
               {student.first_name} {student.last_name}
             </div>
 
@@ -276,10 +283,15 @@ export default function ReportPage() {
     Promise.all([
       api.get('/report-settings'),
       api.get('/academic-years'),
-    ]).then(([sRes, yRes]) => {
+      api.get('/academic-years/active').then(r => r.data || null).catch(() => null),
+    ]).then(([sRes, yRes, activeRes]) => {
       setSettings(sRes.data || { congrats_text: '', show_quote: true, background_image_url: null });
       const years = yRes.data || [];
-      if (years.length > 0) {
+      if (activeRes?.active_year_id) {
+        const active = years.find(y => String(y.id) === String(activeRes.active_year_id)) || activeRes.year;
+        setYearId(String(activeRes.active_year_id));
+        setYearName(String(active?.year_be || active?.title || active?.name || ''));
+      } else if (years.length > 0) {
         setYearId(String(years[0].id));
         setYearName(String(years[0].year_be || years[0].title || years[0].name || ''));
       }

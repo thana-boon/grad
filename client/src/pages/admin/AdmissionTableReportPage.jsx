@@ -22,9 +22,17 @@ export default function AdmissionTableReportPage() {
 
   // Load academic years
   useEffect(() => {
-    api.get('/academic-years').then(r => {
-      const ys = r.data || [];
+    Promise.all([
+      api.get('/academic-years').then(r => r.data || []),
+      api.get('/academic-years/active').then(r => r.data || null).catch(() => null),
+    ]).then(([ys, active]) => {
       setYears(ys);
+      if (active?.active_year_id) {
+        const activeYear = ys.find(y => String(y.id) === String(active.active_year_id)) || active.year;
+        setYearId(String(active.active_year_id));
+        setYearName(String(activeYear?.year_be || activeYear?.title || activeYear?.name || ''));
+        return;
+      }
       if (ys.length > 0) {
         setYearId(String(ys[0].id));
         setYearName(String(ys[0].year_be || ys[0].title || ys[0].name || ''));

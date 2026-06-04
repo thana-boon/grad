@@ -23,15 +23,25 @@ router.get('/active', verifyToken, async (req, res) => {
     const [rows] = await db.query(
       "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
     );
-    if (rows.length === 0 || !rows[0].value) {
-      return res.json({ active_year_id: null, year: null });
+    if (rows.length > 0 && rows[0].value) {
+      const yearId = rows[0].value;
+      const [years] = await db.query(
+        'SELECT id, year_be, title, is_active FROM school_app.academic_years WHERE id = ?',
+        [yearId]
+      );
+      if (years.length > 0) {
+        return res.json({ active_year_id: Number(yearId), year: years[0] });
+      }
     }
-    const yearId = rows[0].value;
-    const [years] = await db.query(
-      'SELECT id, year_be, title, is_active FROM school_app.academic_years WHERE id = ?',
-      [yearId]
+
+    const [activeRows] = await db.query(
+      'SELECT id, year_be, title, is_active FROM school_app.academic_years WHERE is_active = 1 ORDER BY id DESC LIMIT 1'
     );
-    res.json({ active_year_id: Number(yearId), year: years[0] || null });
+    if (activeRows.length > 0) {
+      return res.json({ active_year_id: Number(activeRows[0].id), year: activeRows[0] });
+    }
+
+    res.json({ active_year_id: null, year: null });
   } catch (err) {
     // ถ้า settings table ยังไม่ได้สร้าง หรือ error อื่น → return null แทน crash
     res.json({ active_year_id: null, year: null });
@@ -44,6 +54,9 @@ router.put('/active', verifyToken, adminOnly, async (req, res) => {
   const { year_id } = req.body;
   if (!year_id) return res.status(400).json({ message: 'year_id required' });
   try {
+    await db.query('UPDATE school_app.academic_years SET is_active = 0');
+    await db.query('UPDATE school_app.academic_years SET is_active = 1 WHERE id = ?', [year_id]);
+
     // สร้าง settings table ถ้ายังไม่มี
     await db.query(
       `CREATE TABLE IF NOT EXISTS \`settings\` (
