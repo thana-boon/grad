@@ -4,6 +4,7 @@ import html2canvas from 'html2canvas';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import api from '../../utils/api';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 // ─── Layout engine (left column only, 1 or 2 cols, up to 20 unis) ─────────────
 function getUniLayout(count) {
@@ -50,7 +51,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
       {/* Background image */}
       {settings.background_image_url && (
         <img
-          src={settings.background_image_url}
+          src={resolveMediaUrl(settings.background_image_url)}
           crossOrigin="anonymous"
           alt=""
           style={{
@@ -64,7 +65,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
       {/* School Logo — absolute top-left corner */}
       {settings.school_logo_url && (
         <img
-          src={settings.school_logo_url}
+          src={resolveMediaUrl(settings.school_logo_url)}
           crossOrigin="anonymous"
           alt=""
           style={{
@@ -154,7 +155,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                       }}>
                         {g.logo_url && (
                           <img
-                            src={g.logo_url}
+                            src={resolveMediaUrl(g.logo_url)}
                             crossOrigin="anonymous"
                             alt=""
                             style={{ width: logoSize, height: logoSize, objectFit: 'contain', flexShrink: 0 }}
@@ -204,7 +205,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             }}>
               {student.photo_url
                 ? <img
-                    src={student.photo_url}
+                    src={resolveMediaUrl(student.photo_url)}
                     crossOrigin="anonymous"
                     alt=""
                     style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }}
@@ -380,8 +381,8 @@ export default function ReportPage() {
 
     // Preload shared assets
     await preloadImages([
-      settings.background_image_url,
-      settings.school_logo_url,
+      resolveMediaUrl(settings.background_image_url),
+      resolveMediaUrl(settings.school_logo_url),
     ]);
 
     for (let i = 0; i < students.length; i++) {
@@ -389,8 +390,8 @@ export default function ReportPage() {
 
       // Preload per-student images
       await preloadImages([
-        student.photo_url,
-        ...( student.admissions || []).map(a => a.logo_url),
+        resolveMediaUrl(student.photo_url),
+        ...( student.admissions || []).map(a => resolveMediaUrl(a.logo_url)),
       ]);
 
       // Place at top-left so html2canvas can see it; covered by full-screen overlay (rendered below)
@@ -472,7 +473,7 @@ export default function ReportPage() {
             {settings.school_logo_url ? (
               <div className="flex flex-col gap-2 items-center">
                 <img
-                  src={settings.school_logo_url}
+                  src={resolveMediaUrl(settings.school_logo_url)}
                   alt="school logo"
                   className="w-24 h-24 object-contain rounded-lg border border-base-300 bg-base-200 p-1"
                 />
@@ -550,7 +551,7 @@ export default function ReportPage() {
             {settings.background_image_url ? (
               <div className="flex flex-col gap-2">
                 <img
-                  src={settings.background_image_url}
+                  src={resolveMediaUrl(settings.background_image_url)}
                   alt="background"
                   className="w-full h-28 object-cover rounded-lg border border-base-300"
                 />

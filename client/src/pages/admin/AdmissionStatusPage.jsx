@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 const STATUS_LABEL = {
   none: { label: 'ยังไม่บันทึก', badge: 'badge-error', icon: '❌' },
@@ -181,7 +182,7 @@ export default function AdmissionStatusPage() {
                     >
                       <span className="text-base-content/40 text-xs w-4 flex-shrink-0">{idx + 1}</span>
                       {a.logo_url
-                        ? <img src={a.logo_url} alt="" className="w-10 h-10 object-contain rounded flex-shrink-0" />
+                        ? <img src={resolveMediaUrl(a.logo_url)} alt="" className="w-10 h-10 object-contain rounded flex-shrink-0" />
                         : <div className="w-10 h-10 bg-base-300 rounded flex items-center justify-center text-lg flex-shrink-0">🏛️</div>}
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm">{a.university_name}</p>

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState, useMemo, useRef } from 'react';
 import api from '../../utils/api';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 const TYPE_BADGE = {
   'ทปอ.':    'badge-primary',
@@ -94,7 +95,7 @@ export default function UniversitiesPage() {
   const openEdit = (u) => {
     setEditTarget(u);
     setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '', university_type: u.university_type || '' });
-    setLogoFile(null); setLogoPreview(u.logo_url || ''); setFormError('');
+    setLogoFile(null); setLogoPreview(resolveMediaUrl(u.logo_url || '')); setFormError('');
     setModalOpen(true);
   };
 
@@ -161,7 +162,7 @@ export default function UniversitiesPage() {
 
   const LogoImg = ({ src }) =>
     src ? (
-      <img src={src} alt="logo" className="w-8 h-8 object-contain rounded"
+      <img src={resolveMediaUrl(src)} alt="logo" className="w-8 h-8 object-contain rounded"
         onError={e => { e.target.style.display = 'none'; }} />
     ) : (
       <div className="w-8 h-8 rounded bg-base-200 flex items-center justify-center text-base-content/30 text-xs">🏛️</div>

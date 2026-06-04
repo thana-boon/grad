@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import { resolveMediaUrl } from '../../utils/mediaUrl';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -118,7 +119,7 @@ export default function AdminDashboard() {
                   <div key={i} className="flex items-center gap-3">
                     <span className="text-xs text-base-content/40 w-4 text-right flex-shrink-0">{i + 1}</span>
                     {u.logo_url
-                      ? <img src={u.logo_url} alt="" className="w-7 h-7 object-contain flex-shrink-0" />
+                      ? <img src={resolveMediaUrl(u.logo_url)} alt="" className="w-7 h-7 object-contain flex-shrink-0" />
                       : <span className="w-7 h-7 flex items-center justify-center text-lg flex-shrink-0">🏛️</span>
                     }
                     <div className="flex-1 min-w-0">

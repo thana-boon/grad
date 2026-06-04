@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import { resolveMediaUrl } from '../utils/mediaUrl';
 
 // ── Custom Confirm Dialog ─────────────────────────────────────────────────────
 function ConfirmDialog({ open, title, message, confirmLabel = 'ยืนยัน', confirmClass = 'btn-error', onConfirm, onCancel }) {
@@ -536,7 +537,7 @@ export default function StudentPage() {
           <div className="avatar cursor-pointer" onClick={() => fileInputRef.current?.click()}>
             <div className="w-28 h-40 rounded-2xl ring ring-primary ring-offset-base-100 ring-offset-2 overflow-hidden bg-base-300 flex items-center justify-center">
               {photoUrl
-                ? <img src={photoUrl} alt="รูปโปรไฟล์" className="w-full h-full object-cover" />
+                ? <img src={resolveMediaUrl(photoUrl)} alt="รูปโปรไฟล์" className="w-full h-full object-cover" />
                 : <span className="text-5xl">🧑‍🎓</span>}
             </div>
           </div>
@@ -600,7 +601,7 @@ export default function StudentPage() {
                     {/* Logo */}
                     <div className="w-10 h-10 flex-shrink-0">
                       {a.logo_url
-                        ? <img src={a.logo_url} alt="" className="w-10 h-10 object-contain rounded" />
+                        ? <img src={resolveMediaUrl(a.logo_url)} alt="" className="w-10 h-10 object-contain rounded" />
                         : <div className="w-10 h-10 bg-base-300 rounded flex items-center justify-center text-lg">🏛️</div>}
                     </div>
 

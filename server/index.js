@@ -9,8 +9,23 @@ const logger = require('./config/logger');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 // Middleware
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Allow non-browser clients and same-origin requests with no Origin header.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // HTTP request log ผ่าน morgan → winston
