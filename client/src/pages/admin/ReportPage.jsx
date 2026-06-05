@@ -23,7 +23,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
   // Group admissions by university
   const grouped = Object.values(
     allAdmissions.reduce((acc, a) => {
-      const key = a.university_id || a.university_name;
+      const key = `${a.university_id || a.university_name}_${a.campus || ''}`;
       if (!acc[key]) acc[key] = { ...a, entries: [] };
       acc[key].entries.push({ faculty_name: a.faculty_name, program_name: a.program_name, confirmed: a.confirmed });
       if (a.confirmed) acc[key].groupConfirmed = true;
@@ -170,7 +170,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                         )}
                         <div style={{ flex: isVertical ? undefined : 1, minWidth: 0, textAlign: isVertical ? 'center' : 'left' }}>
                           <div style={{ fontSize: uniSize, fontWeight: 700, lineHeight: 1.25, marginBottom: 6 }}>
-                            {g.university_name}
+                            {g.university_name}{g.campus ? ` (${g.campus})` : ''}
                           </div>
                           {g.entries.map((e, i) => (
                             <div key={i} style={{

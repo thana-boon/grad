@@ -10,6 +10,52 @@ const PIE_COLORS = [
   '#2563eb','#16a34a',
 ];
 
+const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const THAI_YEARS = Array.from({ length: 16 }, (_, i) => 2560 + i); // พ.ศ. 2560–2575
+
+function ThaiDatePicker({ value, onChange }) {
+  const parse = (v) => {
+    if (!v) return { day: '', month: '', year: '' };
+    const p = v.split('-');
+    return { day: parseInt(p[2]) || '', month: parseInt(p[1]) || '', year: parseInt(p[0]) + 543 || '' };
+  };
+
+  const [local, setLocal] = useState(() => parse(value));
+
+  // sync เมื่อ parent ล้างค่า (เช่น กดปุ่ม ✕ ล้าง)
+  useEffect(() => { setLocal(parse(value)); }, [value]);
+
+  const handleChange = (field, val) => {
+    const next = { ...local, [field]: val };
+    setLocal(next);
+    if (next.day && next.month && next.year) {
+      onChange(`${next.year - 543}-${String(next.month).padStart(2,'0')}-${String(next.day).padStart(2,'0')}`);
+    } else {
+      onChange('');
+    }
+  };
+
+  return (
+    <div className="flex gap-1">
+      <select className="select select-bordered select-sm w-16"
+        value={local.day} onChange={e => handleChange('day', Number(e.target.value))}>
+        <option value="">วัน</option>
+        {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
+      <select className="select select-bordered select-sm w-[4.5rem]"
+        value={local.month} onChange={e => handleChange('month', Number(e.target.value))}>
+        <option value="">เดือน</option>
+        {THAI_MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+      </select>
+      <select className="select select-bordered select-sm w-24"
+        value={local.year} onChange={e => handleChange('year', Number(e.target.value))}>
+        <option value="">ปี พ.ศ.</option>
+        {THAI_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+      </select>
+    </div>
+  );
+}
+
 export default function AdmissionTableReportPage() {
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -18,7 +64,21 @@ export default function AdmissionTableReportPage() {
   const [loading, setLoading] = useState(false);
   const [showChart, setShowChart] = useState(false);
   const [chartMode, setChartMode] = useState('all'); // 'all' | 'confirmed'
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [includeNoData, setIncludeNoData] = useState(true);
   const tableRef = useRef(null);
+
+  const filterByDate = (admissions) => {
+    if (!dateFrom && !dateTo) return admissions;
+    return admissions.filter(a => {
+      if (!a.created_at) return false;
+      const d = new Date(a.created_at);
+      if (dateFrom && d < new Date(dateFrom + 'T00:00:00')) return false;
+      if (dateTo && d > new Date(dateTo + 'T23:59:59')) return false;
+      return true;
+    });
+  };
 
   // Load academic years
   useEffect(() => {
@@ -52,10 +112,13 @@ export default function AdmissionTableReportPage() {
       .finally(() => setLoading(false));
   }, [yearId]);
 
-  // Flatten to rows for table/export
-  // Each student → one row per admission; if none → one blank row
-  const flatRows = students.map((s, si) => {
-    const admissions = s.admissions || [];
+  // Flatten to rows for table/export — admissions filtered by date range
+  const exportStudents = includeNoData
+    ? students
+    : students.filter(s => filterByDate(s.admissions || []).length > 0);
+
+  const flatRows = exportStudents.map((s, si) => {
+    const admissions = filterByDate(s.admissions || []);
     if (admissions.length === 0) {
       return [{
         seq: si + 1,
@@ -126,12 +189,11 @@ export default function AdmissionTableReportPage() {
   };
 
   const totalStudents = students.length;
-  const withAdmissions = students.filter(s => s.admissions?.length > 0).length;
-  const confirmed = students.filter(s => s.admissions?.some(a => a.confirmed)).length;
-
-  // Chart data
-  const allAdmissions = students.flatMap(s => s.admissions || []);
+  const allAdmissions = students.flatMap(s => filterByDate(s.admissions || []));
   const confirmedAdmissions = allAdmissions.filter(a => a.confirmed);
+  const withAdmissions = students.filter(s => filterByDate(s.admissions || []).length > 0).length;
+  const confirmed = students.filter(s => filterByDate(s.admissions || []).some(a => a.confirmed)).length;
+  const isFiltered = !!(dateFrom || dateTo);
 
   const buildChartData = (admissions) => ({
     uni: Object.values(
@@ -145,6 +207,14 @@ export default function AdmissionTableReportPage() {
     fac: Object.values(
       admissions.reduce((acc, a) => {
         const key = a.faculty_name || 'ไม่ระบุ';
+        acc[key] = acc[key] || { name: key, value: 0 };
+        acc[key].value++;
+        return acc;
+      }, {})
+    ).sort((a, b) => b.value - a.value),
+    prog: Object.values(
+      admissions.reduce((acc, a) => {
+        const key = a.group_field || 'ไม่ระบุ';
         acc[key] = acc[key] || { name: key, value: 0 };
         acc[key].value++;
         return acc;
@@ -173,8 +243,6 @@ export default function AdmissionTableReportPage() {
         {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3 no-print">
           <h1 className="text-xl font-bold">📋 รายงานผลการสอบ (ตาราง)</h1>
-
-          {/* Year selector */}
           <select
             className="select select-bordered select-sm"
             value={yearId}
@@ -192,15 +260,16 @@ export default function AdmissionTableReportPage() {
           </select>
         </div>
 
-        {/* Stats */}
+        {/* Stats + Filter + Actions — one card */}
         <div className="card bg-base-100 shadow border border-base-300 no-print">
-          <div className="flex divide-x divide-base-300">
+          {/* Stats row */}
+          <div className="flex divide-x divide-base-300 border-b border-base-300">
             <div className="flex-1 px-4 py-3 text-center">
               <div className="text-xs text-base-content/50">นักเรียนทั้งหมด</div>
               <div className="text-xl font-bold text-primary">{totalStudents}</div>
             </div>
             <div className="flex-1 px-4 py-3 text-center">
-              <div className="text-xs text-base-content/50">บันทึกมหาลัยแล้ว</div>
+              <div className="text-xs text-base-content/50">{isFiltered ? 'บันทึกในช่วงนี้' : 'บันทึกมหาลัยแล้ว'}</div>
               <div className="text-xl font-bold text-info">{withAdmissions}</div>
             </div>
             <div className="flex-1 px-4 py-3 text-center">
@@ -212,31 +281,64 @@ export default function AdmissionTableReportPage() {
               <div className="text-xl font-bold text-error">{totalStudents - withAdmissions}</div>
             </div>
           </div>
-        </div>
 
-        {/* Export buttons */}
-        <div className="flex flex-wrap gap-2 no-print">
-          <button
-            className="btn btn-success btn-sm gap-2"
-            onClick={exportExcel}
-            disabled={loading || students.length === 0}
-          >
-            📊 Export Excel (.xlsx)
-          </button>
-          <button
-            className="btn btn-primary btn-sm gap-2"
-            onClick={exportPdf}
-            disabled={loading || students.length === 0}
-          >
-            🖨️ Print / Export PDF
-          </button>
-          <button
-            className="btn btn-secondary btn-sm gap-2"
-            onClick={() => setShowChart(true)}
-            disabled={loading || allAdmissions.length === 0}
-          >
-            🥧 ดูกราฟวิเคราะห์
-          </button>
+          {/* Filter + Actions row */}
+          <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+            {/* Date range filter */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-base-content/50 whitespace-nowrap">📅 ตั้งแต่</span>
+              <ThaiDatePicker value={dateFrom} onChange={setDateFrom} />
+              <span className="text-xs text-base-content/40">ถึง</span>
+              <ThaiDatePicker value={dateTo} onChange={setDateTo} />
+              {isFiltered && (
+                <button
+                  className="btn btn-ghost btn-xs"
+                  onClick={() => { setDateFrom(''); setDateTo(''); }}
+                >
+                  ✕ ล้าง
+                </button>
+              )}
+            </div>
+
+            {/* Checkbox: รวมไม่มีข้อมูล */}
+            <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+              <input
+                type="checkbox"
+                className="checkbox checkbox-sm checkbox-primary"
+                checked={includeNoData}
+                onChange={e => setIncludeNoData(e.target.checked)}
+              />
+              <span className="text-sm">รวมนักเรียนที่ไม่มีข้อมูล</span>
+            </label>
+
+            {/* Divider */}
+            <div className="hidden sm:block w-px h-6 bg-base-300" />
+
+            {/* Action buttons */}
+            <div className="flex gap-2 flex-wrap">
+              <button
+                className="btn btn-success btn-sm gap-1"
+                onClick={exportExcel}
+                disabled={loading || students.length === 0}
+              >
+                📊 Excel
+              </button>
+              <button
+                className="btn btn-primary btn-sm gap-1"
+                onClick={exportPdf}
+                disabled={loading || students.length === 0}
+              >
+                🖨️ PDF
+              </button>
+              <button
+                className="btn btn-secondary btn-sm gap-1"
+                onClick={() => setShowChart(true)}
+                disabled={loading || allAdmissions.length === 0}
+              >
+                🥧 กราฟ
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Chart Modal */}
@@ -352,6 +454,44 @@ export default function AdmissionTableReportPage() {
                     </>
                   )}
                 </div>
+              </div>
+
+              {/* Pie 3: by Program/สาขา — full width */}
+              <div className="flex flex-col gap-2 mt-8 border-t border-base-300 pt-6">
+                <h3 className="font-semibold text-center">สาขา/กลุ่มวิชาที่สอบติด</h3>
+                {activeData.prog.length === 0 ? (
+                  <p className="text-center text-base-content/40 py-10">ไม่มีข้อมูล</p>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    <ResponsiveContainer width="100%" height={350}>
+                      <PieChart>
+                        <Pie
+                          data={activeData.prog}
+                          cx="50%" cy="50%"
+                          outerRadius={130}
+                          dataKey="value"
+                          label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                          labelLine={false}
+                        >
+                          {activeData.prog.map((_, i) => (
+                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(v, n) => [`${v} รายการ (${((v/activeTotal)*100).toFixed(1)}%)`, n]} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
+                      {activeData.prog.map((d, i) => (
+                        <div key={i} className="flex items-center gap-2 text-xs">
+                          <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                          <span className="flex-1">{d.name}</span>
+                          <span className="font-semibold whitespace-nowrap">{d.value} รายการ</span>
+                          <span className="text-base-content/50 whitespace-nowrap">({((d.value/activeTotal)*100).toFixed(1)}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

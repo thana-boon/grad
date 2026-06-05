@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+﻿import { useState, useEffect, useMemo, useRef } from 'react';
 import api from '../../utils/api';
 
 const EMPTY_FORM = { campus: '', faculty_name: '', group_field: '', field_name_th: '', program_name_th: '', program_type: '' };
@@ -6,6 +6,9 @@ const EMPTY_FORM = { campus: '', faculty_name: '', group_field: '', field_name_t
 export default function FacultiesPage() {
   const [unis, setUnis] = useState([]);
   const [selectedUniId, setSelectedUniId] = useState('');
+  const [uniSearch, setUniSearch] = useState('');
+  const [showUniDropdown, setShowUniDropdown] = useState(false);
+  const uniDropdownRef = useRef(null);
   const [programs, setPrograms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selCampus, setSelCampus] = useState('');
@@ -78,6 +81,27 @@ export default function FacultiesPage() {
     api.get('/universities').then(r => setUnis(r.data)).catch(() => {});
   }, []);
 
+  // ปิด dropdown เมื่อคลิกนอก
+  useEffect(() => {
+    const handler = (e) => {
+      if (uniDropdownRef.current && !uniDropdownRef.current.contains(e.target)) {
+        setShowUniDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filteredUnis = useMemo(() => {
+    const q = uniSearch.toLowerCase();
+    if (!q) return unis;
+    return unis.filter(u =>
+      (u.name || '').toLowerCase().includes(q) ||
+      (u.name_th || '').toLowerCase().includes(q) ||
+      (u.university_type || '').toLowerCase().includes(q)
+    );
+  }, [unis, uniSearch]);
+
   useEffect(() => {
     setPrograms([]); setSelCampus(''); setSelFaculty(''); setSearch('');
     if (!selectedUniId) return;
@@ -129,15 +153,44 @@ export default function FacultiesPage() {
         <p className="text-xs text-base-content/50">ข้อมูลนำเข้าจาก Excel · จัดการผ่านหน้ามหาวิทยาลัย</p>
       </div>
 
-      <select className="select select-bordered w-full max-w-lg" value={selectedUniId}
-        onChange={e => setSelectedUniId(e.target.value)}>
-        <option value="">— เลือกมหาวิทยาลัย —</option>
-        {unis.map(u => (
-          <option key={u.id} value={u.id}>
-            {u.university_type ? `[${u.university_type}] ` : ''}{u.name}
-          </option>
-        ))}
-      </select>
+      <div className="relative w-full max-w-lg" ref={uniDropdownRef}>
+        <div className="relative">
+          <input
+            className="input input-bordered w-full pr-8"
+            placeholder="🔍 พิมพ์ชื่อมหาวิทยาลัย..."
+            value={uniSearch}
+            onChange={e => { setUniSearch(e.target.value); setShowUniDropdown(true); }}
+            onFocus={() => setShowUniDropdown(true)}
+          />
+          {selectedUniId && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-xs btn-circle"
+              onClick={() => { setSelectedUniId(''); setUniSearch(''); }}
+              title="ล้างการเลือก"
+            >✕</button>
+          )}
+        </div>
+        {showUniDropdown && (
+          <ul className="absolute z-50 mt-1 w-full bg-base-100 shadow-lg border border-base-300 rounded-lg max-h-64 overflow-y-auto">
+            {filteredUnis.length === 0 ? (
+              <li className="px-4 py-3 text-sm text-base-content/40 text-center">ไม่พบมหาวิทยาลัย</li>
+            ) : filteredUnis.map(u => (
+              <li
+                key={u.id}
+                className={`px-4 py-2 cursor-pointer text-sm hover:bg-base-200 transition-colors ${String(selectedUniId) === String(u.id) ? 'bg-primary/10 font-medium text-primary' : ''}`}
+                onMouseDown={() => {
+                  setSelectedUniId(String(u.id));
+                  setUniSearch(u.name || u.name_th || '');
+                  setShowUniDropdown(false);
+                }}
+              >
+                {u.university_type ? <span className="text-base-content/40 text-xs mr-1">[{u.university_type}]</span> : null}
+                {u.name || u.name_th}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {!selectedUniId ? (
         <div className="text-center text-base-content/40 py-24 text-sm">

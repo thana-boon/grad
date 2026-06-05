@@ -141,7 +141,7 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
       const [admissions] = await db.query(
         `SELECT sa.student_code, sa.id, sa.university_id, sa.program_id, sa.confirmed, sa.created_at,
                 u.name_th AS university_name, u.logo_url,
-                p.faculty_name,
+                p.campus, p.faculty_name, p.group_field,
                 p.program_name_th AS program_name
          FROM student_admissions sa
          JOIN universities u ON u.id = sa.university_id
@@ -188,7 +188,6 @@ router.post('/login', loginLimiter, async (req, res) => {
       `SELECT student_code, first_name, last_name, citizen_id, class_level, class_room
        FROM school_app.students
        WHERE (student_code = ? OR student_code = ?)
-         AND citizen_id IS NOT NULL
        ORDER BY year_id DESC
        LIMIT 1`,
       [paddedCode, String(numericCode)]
@@ -200,7 +199,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     const student = rows[0];
-    const expectedPassword = `Skdw${student.citizen_id}`;
+    const expectedPassword = student.citizen_id ? `Skdw${student.citizen_id}` : 'Skdw';
 
     if (password !== expectedPassword) {
       logger.warn('Student login failed: wrong password', { username, ip: req.ip });
@@ -601,6 +600,15 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
           const progName = String(
             pick(row, ['program_name_th', 'program_name', 'program', 'สาขา']) || ''
           ).trim();
+          const campusName = String(
+            pick(row, ['campus_name_th', 'campus', 'วิทยาเขต']) || ''
+          ).trim();
+          const groupField = String(
+            pick(row, ['group_field_th', 'group_field', 'สาขา/กลุ่มวิชา', 'กลุ่มวิชา']) || ''
+          ).trim();
+          const fieldName = String(
+            pick(row, ['field_name_th', 'field_name', 'วิชาเอก']) || ''
+          ).trim();
 
           // confirmed flag
           const confirmed = parseConfirmed(
@@ -637,12 +645,40 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
           }
           const universityId = unis[0].id;
 
-          // Find program
-          const [progs] = await db.query(
-            'SELECT id FROM programs WHERE university_id = ? AND program_name_th = ? LIMIT 1',
-            [universityId, progName]
-          );
-          if (!progs.length) {
+          // Find program — try progressively less specific until found
+          let progs;
+          if (campusName && facName && groupField) {
+            [progs] = await db.query(
+              'SELECT id FROM programs WHERE university_id=? AND program_name_th=? AND campus=? AND faculty_name=? AND group_field=? LIMIT 1',
+              [universityId, progName, campusName, facName, groupField]
+            );
+          }
+          if (!progs?.length && campusName && facName) {
+            [progs] = await db.query(
+              'SELECT id FROM programs WHERE university_id=? AND program_name_th=? AND campus=? AND faculty_name=? LIMIT 1',
+              [universityId, progName, campusName, facName]
+            );
+          }
+          if (!progs?.length && campusName) {
+            [progs] = await db.query(
+              'SELECT id FROM programs WHERE university_id=? AND program_name_th=? AND campus=? LIMIT 1',
+              [universityId, progName, campusName]
+            );
+          }
+          if (!progs?.length) {
+            [progs] = await db.query(
+              'SELECT id FROM programs WHERE university_id=? AND program_name_th=? LIMIT 1',
+              [universityId, progName]
+            );
+          }
+          // ถ้าพบ program แต่ยังไม่มี group_field ให้ update จากข้อมูล Excel
+          if (progs?.length && groupField) {
+            await db.query(
+              'UPDATE programs SET group_field=? WHERE id=? AND (group_field IS NULL OR group_field="")',
+              [groupField, progs[0].id]
+            );
+          }
+          if (!progs?.length) {
             skipped++;
             warnings.push({
               student_code: studentCode,

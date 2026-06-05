@@ -380,6 +380,7 @@ export default function AdmissionStatusPage() {
                         : <div className="w-9 h-9 bg-base-300 rounded flex items-center justify-center text-lg flex-shrink-0">🏛️</div>}
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm leading-tight">{a.university_name}</p>
+                        {a.campus && <p className="text-xs text-info font-medium">วิทยาเขต {a.campus}</p>}
                         <p className="text-xs text-base-content/60">{a.faculty_name}</p>
                         <p className="text-xs text-base-content/50">{a.program_name}</p>
                         {a.created_at && (
