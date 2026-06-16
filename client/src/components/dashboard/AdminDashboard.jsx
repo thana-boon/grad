@@ -12,12 +12,20 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api.get('/academic-years').then(r => {
-      const ys = r.data || [];
+    Promise.all([
+      api.get('/academic-years').then(r => r.data || []),
+      api.get('/academic-years/active').then(r => r.data || null).catch(() => null),
+    ]).then(([ys, active]) => {
       setYears(ys);
-      if (ys.length > 0) {
-        setYearId(String(ys[0].id));
-        setYearName(String(ys[0].year_be || ys[0].title || ys[0].name || ''));
+      // ใช้ปีที่ GradTrack ตั้ง active ก่อน ถ้าไม่มีค่อย fallback ปีล่าสุด
+      let pick = null;
+      if (active?.active_year_id) {
+        pick = ys.find(y => String(y.id) === String(active.active_year_id));
+      }
+      if (!pick && ys.length > 0) pick = ys[0];
+      if (pick) {
+        setYearId(String(pick.id));
+        setYearName(String(pick.year_be || pick.title || pick.name || ''));
       }
     });
   }, []);

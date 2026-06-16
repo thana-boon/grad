@@ -11,6 +11,13 @@ const { loginLimiter } = require('../middlewares/rateLimiter');
 const logger = require('../config/logger');
 const { logActivity } = require('./activityLogs');
 
+// รหัสนักเรียน: ตัด 0 นำหน้าเพื่อใช้เทียบข้ามแหล่งข้อมูล
+// (Student API ส่งรหัสแบบ pad 0 เช่น "02809" แต่ข้อมูลเก่าใน DB เก็บแบบ "2809")
+const normCode = (c) => {
+  const n = parseInt(c, 10);
+  return Number.isNaN(n) ? String(c ?? '') : String(n);
+};
+
 // ─── Auto-create tables ───────────────────────────────────────────────────────
 const ensureProfileTable = async () => {
   await db.query(`
@@ -130,10 +137,10 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
       .filter((s) => /^ม\.?\s?6/.test(String(s.class_level || '').trim()))
       .sort((a, b) => (a.class_room - b.class_room) || (a.number_in_room - b.number_in_room));
 
-    // ดึง photo_url / quote จาก student_profiles (local) แล้ว merge
+    // ดึง photo_url / quote จาก student_profiles (local) แล้ว merge (เทียบแบบตัด 0 นำหน้า)
     const [profileRows] = await db.query('SELECT student_code, photo_url, quote FROM student_profiles');
     const profileMap = {};
-    for (const p of profileRows) profileMap[p.student_code] = p;
+    for (const p of profileRows) profileMap[normCode(p.student_code)] = p;
 
     const students = m6.map((s) => ({
       student_code: s.student_code,
@@ -142,12 +149,15 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
       class_level: s.class_level,
       class_room: s.class_room,
       number_in_room: s.number_in_room,
-      photo_url: profileMap[s.student_code]?.photo_url || null,
-      quote: profileMap[s.student_code]?.quote || null,
+      photo_url: profileMap[normCode(s.student_code)]?.photo_url || null,
+      quote: profileMap[normCode(s.student_code)]?.quote || null,
     }));
 
     // ดึง admissions ทั้งหมดของนักเรียนเหล่านี้ พร้อมชื่อ มหาลัย/คณะ/สาขา
-    const codes = students.map(s => s.student_code);
+    // ใส่ทั้งรหัสแบบ pad และแบบตัด 0 ใน IN() เพื่อให้ match ข้อมูลเก่าที่ไม่ได้ pad
+    const codeSet = new Set();
+    for (const s of students) { codeSet.add(s.student_code); codeSet.add(normCode(s.student_code)); }
+    const codes = [...codeSet];
     let admissionMap = {};
     if (codes.length > 0) {
       const [admissions] = await db.query(
@@ -163,14 +173,15 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
         [codes]
       );
       for (const row of admissions) {
-        if (!admissionMap[row.student_code]) admissionMap[row.student_code] = [];
-        admissionMap[row.student_code].push(row);
+        const key = normCode(row.student_code);
+        if (!admissionMap[key]) admissionMap[key] = [];
+        admissionMap[key].push(row);
       }
     }
 
     // รวมข้อมูล + จัดกลุ่มสถานะ
     const result = students.map(s => {
-      const list = admissionMap[s.student_code] || [];
+      const list = admissionMap[normCode(s.student_code)] || [];
       const hasConfirmed = list.some(a => a.confirmed);
       const status = list.length === 0 ? 'none' : hasConfirmed ? 'confirmed' : 'pending';
       return { ...s, admissions: list, status };
@@ -382,6 +393,7 @@ router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
   try {
     await ensureAdmissionTable();
     const code = req.user.student_code;
+    // เทียบทั้งรหัสแบบ pad และแบบตัด 0 เพื่อให้เห็นข้อมูลเก่าที่เก็บแบบไม่ pad
     const [rows] = await db.query(
       `SELECT sa.id, sa.confirmed,
               u.id AS university_id, u.name_th AS university_name, u.logo_url,
@@ -391,9 +403,9 @@ router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
        FROM student_admissions sa
        JOIN universities u ON u.id = sa.university_id
        JOIN programs p ON p.id = sa.program_id
-       WHERE sa.student_code = ?
+       WHERE sa.student_code IN (?, ?)
        ORDER BY sa.confirmed DESC, sa.created_at ASC`,
-      [code]
+      [code, normCode(code)]
     );
     res.json(rows);
   } catch (err) {
@@ -416,9 +428,9 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
     if (!prog) return res.status(404).json({ message: 'ไม่พบหลักสูตรนี้' });
     const university_id = prog.university_id;
 
-    // ถ้ายืนยันสิทธิ์แล้ว ห้ามเพิ่ม
+    // ถ้ายืนยันสิทธิ์แล้ว ห้ามเพิ่ม (เช็กทั้งรหัสแบบ pad และไม่ pad)
     const [[confirmed]] = await db.query(
-      'SELECT id FROM student_admissions WHERE student_code = ? AND confirmed = 1 LIMIT 1', [code]
+      'SELECT id FROM student_admissions WHERE student_code IN (?, ?) AND confirmed = 1 LIMIT 1', [code, normCode(code)]
     );
     if (confirmed) return res.status(400).json({ message: 'ยืนยันสิทธิ์แล้ว ไม่สามารถเพิ่มได้' });
 
