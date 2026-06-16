@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const db = require('../config/db');
+const studentApi = require('../config/studentApi');
 const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
 const { loginLimiter } = require('../middlewares/rateLimiter');
 const logger = require('../config/logger');
@@ -123,16 +124,27 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
     await ensureAdmissionTable();
     await ensureProfileTable(); // ป้องกัน JOIN พัง ถ้าตารางยังไม่ถูกสร้าง
 
-    // ดึงนักเรียน ม.6 ทั้งหมดในปีนั้น พร้อม photo_url และ quote จาก student_profiles
-    const [students] = await db.query(
-      `SELECT s.student_code, s.first_name, s.last_name, s.class_level, s.class_room, s.number_in_room,
-              sp.photo_url, sp.quote
-       FROM school_app.students s
-       LEFT JOIN student_profiles sp ON sp.student_code COLLATE utf8mb4_general_ci = s.student_code
-       WHERE s.year_id = ? AND s.class_level LIKE 'ม.6%'
-       ORDER BY s.class_room, s.number_in_room`,
-      [year_id]
-    );
+    // ดึงนักเรียน ม.6 ทั้งหมดในปีนั้นจาก Student API (กรองชั้นฝั่ง API)
+    const { data: apiStudents } = await studentApi.listAllStudents({ year_id, class_level: 'ม.6' });
+    const m6 = (apiStudents || [])
+      .filter((s) => /^ม\.?\s?6/.test(String(s.class_level || '').trim()))
+      .sort((a, b) => (a.class_room - b.class_room) || (a.number_in_room - b.number_in_room));
+
+    // ดึง photo_url / quote จาก student_profiles (local) แล้ว merge
+    const [profileRows] = await db.query('SELECT student_code, photo_url, quote FROM student_profiles');
+    const profileMap = {};
+    for (const p of profileRows) profileMap[p.student_code] = p;
+
+    const students = m6.map((s) => ({
+      student_code: s.student_code,
+      first_name: s.first_name,
+      last_name: s.last_name,
+      class_level: s.class_level,
+      class_room: s.class_room,
+      number_in_room: s.number_in_room,
+      photo_url: profileMap[s.student_code]?.photo_url || null,
+      quote: profileMap[s.student_code]?.quote || null,
+    }));
 
     // ดึง admissions ทั้งหมดของนักเรียนเหล่านี้ พร้อมชื่อ มหาลัย/คณะ/สาขา
     const codes = students.map(s => s.student_code);
@@ -180,25 +192,14 @@ router.post('/login', loginLimiter, async (req, res) => {
   }
 
   try {
-    // ค้นหาโดย student_code ที่ pad แล้ว (เทียบทั้ง exact และ int)
+    // ค้นหาจาก Student API (getStudentByCode รองรับทั้งรหัส pad และตัดศูนย์นำหน้า)
     const paddedCode = username.trim();
-    const numericCode = parseInt(paddedCode, 10);
+    const student = await studentApi.getStudentByCode(paddedCode);
 
-    const [rows] = await db.query(
-      `SELECT student_code, first_name, last_name, citizen_id, class_level, class_room
-       FROM school_app.students
-       WHERE (student_code = ? OR student_code = ?)
-       ORDER BY year_id DESC
-       LIMIT 1`,
-      [paddedCode, String(numericCode)]
-    );
-
-    if (!rows.length) {
+    if (!student) {
       logger.warn('Student login failed: not found', { username, ip: req.ip });
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
-
-    const student = rows[0];
     const expectedPassword = student.citizen_id ? `Skdw${student.citizen_id}` : 'Skdw';
 
     if (password !== expectedPassword) {
@@ -261,11 +262,7 @@ router.get('/profile', verifyToken, studentOnly, async (req, res) => {
     await ensureProfileTable();
     const code = req.user.student_code;
 
-    const [[student]] = await db.query(
-      `SELECT student_code, first_name, last_name, class_level, class_room, number_in_room
-       FROM school_app.students WHERE student_code = ? LIMIT 1`,
-      [code]
-    );
+    const student = await studentApi.getStudentByCode(code);
     if (!student) return res.status(404).json({ message: 'ไม่พบข้อมูลนักเรียน' });
 
     const [[profile]] = await db.query(
@@ -273,7 +270,16 @@ router.get('/profile', verifyToken, studentOnly, async (req, res) => {
       [code]
     );
 
-    res.json({ ...student, quote: profile?.quote || '', photo_url: profile?.photo_url || null });
+    res.json({
+      student_code: student.student_code,
+      first_name: student.first_name,
+      last_name: student.last_name,
+      class_level: student.class_level,
+      class_room: student.class_room,
+      number_in_room: student.number_in_room,
+      quote: profile?.quote || '',
+      photo_url: profile?.photo_url || null,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -340,11 +346,11 @@ router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req,
 
       let yearId = Number(req.body.year_id || 0) || 0;
       if (!yearId) {
-        const [[stu]] = await db.query(
-          'SELECT year_id FROM school_app.students WHERE student_code = ? ORDER BY year_id DESC LIMIT 1',
-          [code]
-        );
-        yearId = Number(stu?.year_id || 0);
+        // Student API ไม่คืน year_id ราย student → ใช้ปี active ของ GradTrack แทน
+        const [[setting]] = await db.query(
+          "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
+        ).catch(() => [[null]]);
+        yearId = Number(setting?.value || 0) || 0;
       }
 
       const photoUrl = `/uploads/student-photos/${req.file.filename}`;
@@ -505,20 +511,26 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
     try {
       await ensureAdmissionTable();
 
-      // Get active year from settings first, fallback to school_app
+      // Get active year from settings first, fallback to ปี current ของ Student API
       let activeYearId = null;
       const [[setting]] = await db.query(
         "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
       );
       if (setting?.value) activeYearId = Number(setting.value);
       if (!activeYearId) {
-        const [activeRows] = await db.query(
-          'SELECT id FROM school_app.academic_years WHERE is_active = 1 ORDER BY id DESC LIMIT 1'
-        );
-        if (activeRows.length > 0) activeYearId = Number(activeRows[0].id);
+        const { current } = await studentApi.getAcademicYears();
+        if (current) activeYearId = Number(current.id);
       }
       if (!activeYearId) {
         return res.status(400).json({ message: 'ยังไม่ได้ตั้งปีการศึกษา active' });
+      }
+
+      // ดึงนักเรียนทั้งปีจาก Student API ครั้งเดียว แล้วทำ Map ไว้ตรวจสอบ (เลี่ยงยิง API รายแถว)
+      const { data: yearStudents } = await studentApi.listAllStudents({ year_id: activeYearId });
+      const studentMap = new Map();
+      for (const s of (yearStudents || [])) {
+        studentMap.set(String(s.student_code), s);
+        studentMap.set(String(parseInt(s.student_code, 10)), s);
       }
 
       // Parse Excel
@@ -576,19 +588,15 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
           if (!rawCode) { skipped++; continue; }
           const paddedCode = rawCode.padStart(5, '0');
 
-          // Verify student exists in active year
-          const [students] = await db.query(
-            `SELECT student_code, first_name, last_name FROM school_app.students
-             WHERE year_id = ? AND (student_code = ? OR student_code = ?) LIMIT 1`,
-            [activeYearId, paddedCode, rawCode]
-          );
-          if (!students.length) {
+          // Verify student exists in active year (จาก Map ที่ดึงจาก Student API)
+          const matched = studentMap.get(paddedCode) || studentMap.get(rawCode);
+          if (!matched) {
             skipped++;
             errors.push(`ไม่พบนักเรียนรหัส ${rawCode}`);
             continue;
           }
-          const studentCode = students[0].student_code;
-          const displayName = `${students[0].first_name || ''} ${students[0].last_name || ''}`.trim();
+          const studentCode = matched.student_code;
+          const displayName = `${matched.first_name || ''} ${matched.last_name || ''}`.trim();
 
           // Extract all row fields early (needed for warnings too)
           const uniName = String(

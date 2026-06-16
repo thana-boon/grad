@@ -9,6 +9,22 @@ export default function StudentsPage() {
   const [initializing, setInitializing] = useState(true);
   const [search, setSearch] = useState('');
   const [filterRoom, setFilterRoom] = useState('');
+  const [citizenIds, setCitizenIds] = useState({}); // student_code -> citizen_id (on-demand)
+  const [loadingCode, setLoadingCode] = useState(null);
+
+  // ดึง citizen_id รายคนแบบ on-demand (เลี่ยง rate limit ของ Student API)
+  const revealCitizenId = async (code) => {
+    if (citizenIds[code] !== undefined || loadingCode) return;
+    setLoadingCode(code);
+    try {
+      const res = await api.get(`/students/${code}/citizen-id`);
+      setCitizenIds((prev) => ({ ...prev, [code]: res.data.citizen_id || '' }));
+    } catch {
+      setCitizenIds((prev) => ({ ...prev, [code]: '' }));
+    } finally {
+      setLoadingCode(null);
+    }
+  };
 
   // โหลดปีการศึกษา + ปีที่ active ของ GradTrack
   useEffect(() => {
@@ -36,6 +52,7 @@ export default function StudentsPage() {
     const fetch = async () => {
       setLoading(true);
       setStudents([]);
+      setCitizenIds({}); // ล้าง citizen_id ที่เคยเผยไว้เมื่อเปลี่ยนปี
       try {
         const res = await api.get(`/students?year_id=${selectedYearId}`);
         setStudents(res.data);
@@ -57,12 +74,12 @@ export default function StudentsPage() {
   // กรองตาม search + room
   const filtered = useMemo(() => {
     return students.filter((s) => {
-      const full = `${s.student_code} ${s.first_name} ${s.last_name} ${s.class_room} ${s.citizen_id ?? ''}`.toLowerCase();
+      const full = `${s.student_code} ${s.first_name} ${s.last_name} ${s.class_room} ${citizenIds[s.student_code] ?? ''}`.toLowerCase();
       const matchSearch = !search || full.includes(search.toLowerCase());
       const matchRoom = !filterRoom || s.class_room === filterRoom;
       return matchSearch && matchRoom;
     });
-  }, [students, search, filterRoom]);
+  }, [students, search, filterRoom, citizenIds]);
 
   const selectedYear = years.find((y) => y.id === selectedYearId);
 
@@ -73,7 +90,7 @@ export default function StudentsPage() {
         <div>
           <h2 className="text-lg font-semibold">🎓 รายชื่อนักเรียน ม.6</h2>
           <p className="text-xs text-base-content/50">
-            ดึงข้อมูลจาก school_app · เฉพาะชั้น ม.6
+            ดึงข้อมูลจาก Student API · เฉพาะชั้น ม.6 · เลขประชาชนคลิกดูรายคน
           </p>
         </div>
 
@@ -186,7 +203,21 @@ export default function StudentsPage() {
                   </td>
                   <td>{s.class_room}</td>
                   <td className="text-center">{s.number_in_room}</td>
-                  <td className="font-mono text-xs tracking-widest">{s.citizen_id || <span className="text-base-content/30">—</span>}</td>
+                  <td className="font-mono text-xs tracking-widest">
+                    {citizenIds[s.student_code] !== undefined ? (
+                      citizenIds[s.student_code] || <span className="text-base-content/30">—</span>
+                    ) : (
+                      <button
+                        className="btn btn-ghost btn-xs font-normal"
+                        onClick={() => revealCitizenId(s.student_code)}
+                        disabled={loadingCode === s.student_code}
+                      >
+                        {loadingCode === s.student_code
+                          ? <span className="loading loading-spinner loading-xs" />
+                          : '👁 ดู'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))
             )}
