@@ -76,7 +76,7 @@ export default function StudentsPage() {
     return students.filter((s) => {
       const full = `${s.student_code} ${s.first_name} ${s.last_name} ${s.class_room} ${citizenIds[s.student_code] ?? ''}`.toLowerCase();
       const matchSearch = !search || full.includes(search.toLowerCase());
-      const matchRoom = !filterRoom || s.class_room === filterRoom;
+      const matchRoom = !filterRoom || String(s.class_room) === filterRoom;
       return matchSearch && matchRoom;
     });
   }, [students, search, filterRoom, citizenIds]);

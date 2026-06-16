@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import api from '../../utils/api';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
+import SearchableSelect from '../../components/SearchableSelect';
 
 // ─── Layout engine (left column only, 1 or 2 cols, up to 20 unis) ─────────────
 function getUniLayout(count) {
@@ -450,7 +451,7 @@ export default function ReportPage() {
     if (students.length === 0) return;
     // Store data in localStorage for print page
     localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, yearName }));
-    window.open('/admin/report/print', '_blank');
+    window.open(`${import.meta.env.BASE_URL}admin/report/print`, '_blank');
   };
 
   const previewStudent = students[previewIndex];
@@ -596,18 +597,16 @@ export default function ReportPage() {
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-base">👁️ ตัวอย่างรายงาน</h2>
               {students.length > 0 && (
-                <select
-                  className="select select-bordered select-xs"
-                  style={{ colorScheme: 'light' }}
+                <SearchableSelect
+                  className="w-64"
                   value={previewIndex}
-                  onChange={e => setPreviewIndex(Number(e.target.value))}
-                >
-                  {students.map((s, i) => (
-                    <option key={s.student_code} value={i} style={{ color: '#000' }}>
-                      {s.first_name} {s.last_name} ({s.student_code})
-                    </option>
-                  ))}
-                </select>
+                  onChange={setPreviewIndex}
+                  placeholder="เลือกนักเรียน..."
+                  options={students.map((s, i) => ({
+                    value: i,
+                    label: `${s.first_name} ${s.last_name} (${s.student_code})`,
+                  }))}
+                />
               )}
             </div>
 
