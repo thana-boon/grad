@@ -62,6 +62,14 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/university-students"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="university-students" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/faculties"
             element={
               <ProtectedRoute allowedRole="admin">

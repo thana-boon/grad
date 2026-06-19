@@ -513,6 +513,94 @@ router.post('/admissions/:id/unconfirm', verifyToken, studentOnly, async (req, r
   }
 });
 
+// ─── GET /api/student/admin/students-by-university ───────────────────────────
+// แสดงรายชื่อนักเรียนที่บันทึกผลสอบติดในมหาวิทยาลัยนี้ (กรองตามคณะได้)
+// query: university_id (required), faculty (optional), year_id (optional — ใช้ resolve ชื่อ)
+router.get('/admin/students-by-university', verifyToken, adminOnly, async (req, res) => {
+  const { university_id, faculty, year_id } = req.query;
+  if (!university_id) return res.status(400).json({ message: 'ต้องระบุ university_id' });
+
+  try {
+    await ensureAdmissionTable();
+
+    const params = [Number(university_id)];
+    let facClause = '';
+    if (faculty !== undefined && faculty !== '') {
+      facClause = ' AND p.faculty_name = ?';
+      params.push(faculty);
+    }
+
+    const [rows] = await db.query(
+      `SELECT sa.id, sa.student_code, sa.confirmed, sa.created_at,
+              u.name_th AS university_name, u.logo_url,
+              p.campus, p.faculty_name, p.group_field, p.field_name_th,
+              p.program_name_th, p.program_type
+       FROM student_admissions sa
+       JOIN universities u ON u.id = sa.university_id
+       JOIN programs p ON p.id = sa.program_id
+       WHERE sa.university_id = ?${facClause}
+       ORDER BY p.faculty_name, p.program_name_th, sa.confirmed DESC, sa.created_at ASC`,
+      params
+    );
+
+    // ── resolve ชื่อนักเรียนจาก Student API ──
+    // 1) ปีที่ระบุ → fallback ปี active ของ GradTrack → ดึงทั้งปีมาทำ map
+    let activeYearId = Number(year_id) || null;
+    if (!activeYearId) {
+      const [[setting]] = await db.query(
+        "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
+      ).catch(() => [[null]]);
+      activeYearId = Number(setting?.value || 0) || null;
+    }
+
+    const nameMap = new Map();
+    const setInfo = (s) => {
+      const info = {
+        first_name: s.first_name,
+        last_name: s.last_name,
+        class_level: s.class_level,
+        class_room: s.class_room,
+        number_in_room: s.number_in_room,
+      };
+      nameMap.set(String(s.student_code), info);
+      nameMap.set(normCode(s.student_code), info);
+    };
+
+    if (activeYearId) {
+      try {
+        const { data } = await studentApi.listAllStudents({ year_id: activeYearId });
+        for (const s of (data || [])) setInfo(s);
+      } catch { /* API ล่ม → แสดงเฉพาะรหัส */ }
+    }
+
+    const result = rows.map(r => ({
+      ...r,
+      student: nameMap.get(String(r.student_code)) || nameMap.get(normCode(r.student_code)) || null,
+    }));
+
+    // 2) รหัสที่ยังหาชื่อไม่เจอ (นักเรียนเก่า/คนละปี) → ดึงรายคน (จำกัด concurrency)
+    const missing = [...new Set(result.filter(r => !r.student).map(r => r.student_code))];
+    if (missing.length) {
+      const CONCURRENCY = 5;
+      for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        await Promise.all(missing.slice(i, i + CONCURRENCY).map(async (code) => {
+          try {
+            const s = await studentApi.getStudentByCode(code);
+            if (s) setInfo(s);
+          } catch { /* ข้าม */ }
+        }));
+      }
+      for (const r of result) {
+        if (!r.student) r.student = nameMap.get(normCode(r.student_code)) || null;
+      }
+    }
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── POST /api/student/admin/import-admissions ───────────────────────────────
 // Import admission data from Excel (admin only)
 router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {

@@ -44,6 +44,40 @@ export default function UniversitiesPage() {
 
   const fileRef = useRef(null);
   const excelRef = useRef(null);
+  const previewUrlRef = useRef(null); // เก็บ object URL ปัจจุบันไว้ revoke คืนหน่วยความจำ
+
+  // ตั้งค่า preview เป็น object URL พร้อม revoke อันเก่า (กัน memory leak → renderer crash)
+  const setPreviewObjectUrl = (url) => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = url;
+  };
+
+  // ย่อรูปโลโก้ฝั่ง client ก่อนอัปโหลด — กัน browser decode บิตแมปก้อนใหญ่จนแท็บแครช
+  const downscaleImage = (file, max = 256) => new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > max || height > max) {
+        const scale = Math.min(max / width, max / height);
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('แปลงรูปไม่สำเร็จ')),
+        'image/png'
+      );
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('ไฟล์รูปไม่ถูกต้อง')); };
+    img.src = url;
+  });
+
+  // คืนหน่วยความจำตอน component ถูกถอด
+  useEffect(() => () => { if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current); }, []);
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
@@ -75,28 +109,42 @@ export default function UniversitiesPage() {
   }, [unis, search]);
 
   // ─── Logo file select ────────────────────────────────────────────────────
-  const handleLogoSelect = (e) => {
+  const handleLogoSelect = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setLogoFile(file);
-    const reader = new FileReader();
-    reader.onload = ev => setLogoPreview(ev.target.result);
-    reader.readAsDataURL(file);
-    setForm(f => ({ ...f, logo_url: '' }));
+    try {
+      const blob = await downscaleImage(file, 256); // ย่อก่อน เก็บเฉพาะรูปเล็ก
+      setLogoFile(blob);
+      const objUrl = URL.createObjectURL(blob);
+      setPreviewObjectUrl(objUrl);
+      setLogoPreview(objUrl);
+      setForm(f => ({ ...f, logo_url: '' }));
+    } catch (err) {
+      setFormError(err.message || 'ไม่สามารถอ่านไฟล์รูปได้');
+    }
   };
 
   const openCreate = () => {
     setEditTarget(null);
     setForm({ name: '', short_name: '', logo_url: '', university_type: '' });
-    setLogoFile(null); setLogoPreview(''); setFormError('');
+    setLogoFile(null); setPreviewObjectUrl(null); setLogoPreview(''); setFormError('');
+    if (fileRef.current) fileRef.current.value = '';
     setModalOpen(true);
   };
 
   const openEdit = (u) => {
     setEditTarget(u);
     setForm({ name: u.name, short_name: u.short_name || '', logo_url: u.logo_url || '', university_type: u.university_type || '' });
-    setLogoFile(null); setLogoPreview(resolveMediaUrl(u.logo_url || '')); setFormError('');
+    setLogoFile(null); setPreviewObjectUrl(null); setLogoPreview(resolveMediaUrl(u.logo_url || '')); setFormError('');
+    if (fileRef.current) fileRef.current.value = '';
     setModalOpen(true);
+  };
+
+  // ปิด modal + เคลียร์รูป/หน่วยความจำ/ค่าใน input
+  const closeModal = () => {
+    setModalOpen(false);
+    setLogoFile(null); setPreviewObjectUrl(null);
+    if (fileRef.current) fileRef.current.value = '';
   };
 
   const handleSave = async (e) => {
@@ -108,7 +156,7 @@ export default function UniversitiesPage() {
       fd.append('name', form.name.trim());
       fd.append('short_name', form.short_name.trim());
       fd.append('university_type', form.university_type.trim());
-      if (logoFile) fd.append('logo', logoFile);
+      if (logoFile) fd.append('logo', logoFile, 'logo.png');
       else fd.append('logo_url', form.logo_url.trim());
 
       if (editTarget) {
@@ -118,7 +166,7 @@ export default function UniversitiesPage() {
         await api.post('/universities', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
         showToast('เพิ่มมหาวิทยาลัยสำเร็จ ✅');
       }
-      setModalOpen(false); load();
+      closeModal(); load();
     } catch (err) {
       setFormError(err.response?.data?.message || 'บันทึกไม่สำเร็จ');
     } finally { setSaving(false); }
@@ -163,6 +211,7 @@ export default function UniversitiesPage() {
   const LogoImg = ({ src }) =>
     src ? (
       <img src={resolveMediaUrl(src)} alt="logo" className="w-8 h-8 object-contain rounded"
+        width={32} height={32} loading="lazy" decoding="async"
         onError={e => { e.target.style.display = 'none'; }} />
     ) : (
       <div className="w-8 h-8 rounded bg-base-200 flex items-center justify-center text-base-content/30 text-xs">🏛️</div>
@@ -363,7 +412,7 @@ export default function UniversitiesPage() {
                 <div className="flex items-center gap-3">
                   <div className="w-16 h-16 rounded-lg bg-base-200 flex items-center justify-center border border-base-300 overflow-hidden flex-shrink-0">
                     {logoPreview
-                      ? <img src={logoPreview} alt="preview" className="w-full h-full object-contain" onError={e => { e.target.style.display = 'none'; }} />
+                      ? <img src={logoPreview} alt="preview" className="w-full h-full object-contain" width={64} height={64} decoding="async" onError={e => { e.target.style.display = 'none'; }} />
                       : <span className="text-2xl">🏛️</span>}
                   </div>
                   <div className="flex flex-col gap-1 flex-1">
@@ -373,11 +422,11 @@ export default function UniversitiesPage() {
                     </button>
                     <span className="text-xs text-base-content/40">หรือใส่ URL</span>
                     <input
-                      type="url"
+                      type="text"
                       className="input input-bordered input-xs"
                       placeholder="https://..."
                       value={form.logo_url}
-                      onChange={e => { setForm(f => ({ ...f, logo_url: e.target.value })); setLogoFile(null); setLogoPreview(e.target.value); }}
+                      onChange={e => { setForm(f => ({ ...f, logo_url: e.target.value })); setLogoFile(null); setPreviewObjectUrl(null); setLogoPreview(e.target.value); }}
                     />
                   </div>
                 </div>
@@ -425,7 +474,7 @@ export default function UniversitiesPage() {
               </div>
               {formError && <div className="alert alert-error py-2 text-xs">⚠️ {formError}</div>}
               <div className="modal-action mt-1">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>ยกเลิก</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={closeModal}>ยกเลิก</button>
                 <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
                   {saving && <span className="loading loading-spinner loading-xs" />}
                   {editTarget ? '💾 บันทึก' : '✨ เพิ่ม'}
@@ -433,7 +482,7 @@ export default function UniversitiesPage() {
               </div>
             </form>
           </div>
-          <div className="modal-backdrop" onClick={() => setModalOpen(false)} />
+          <div className="modal-backdrop" onClick={closeModal} />
         </div>
       )}
 

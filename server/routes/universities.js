@@ -242,6 +242,7 @@ router.put('/:id', verifyToken, adminOnly, (req, res) => {
       }
       res.json({ message: 'อัปเดตสำเร็จ' });
     } catch (err) {
+      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'มีชื่อมหาวิทยาลัยนี้อยู่แล้ว' });
       res.status(500).json({ message: err.message });
     }
   });

@@ -12,8 +12,10 @@ function getUniLayout(count) {
   if (count === 0) return {};
   if (count <= 4)  return { cols: 1, logo: 80,  uni: 22, fac: 16, prog: 13, pad: '14px 18px', gap: 12 };
   if (count <= 8)  return { cols: 1, logo: 64,  uni: 18, fac: 14, prog: 11, pad: '10px 14px', gap: 9  };
-  if (count <= 13) return { cols: 1, logo: 52,  uni: 15, fac: 12, prog: 10, pad: '8px 12px',  gap: 7  };
-  return           { cols: 2, logo: 42,  uni: 13, fac: 11, prog: 9,  pad: '7px 10px',  gap: 6  };
+  if (count <= 10) return { cols: 1, logo: 52,  uni: 15, fac: 12, prog: 10, pad: '8px 12px',  gap: 7  };
+  // >10: switch to 2 columns to use vertical space efficiently
+  if (count <= 14) return { cols: 2, logo: 44,  uni: 13, fac: 11, prog: 9,  pad: '7px 10px',  gap: 6  };
+  return           { cols: 2, logo: 36,  uni: 11, fac: 10, prog: 8,  pad: '5px 8px',   gap: 5  };
 }
 
 // ─── StudentCard ─────────────────────────────────────────────────────────────
@@ -181,7 +183,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                             }}>
                               <div style={{ fontSize: facSize, opacity: 0.85, lineHeight: 1.3, marginBottom: 1 }}>
                                 {e.faculty_name}
-                                {e.confirmed && <span style={{ marginLeft: 6, fontSize: facSize - 2, color: 'rgba(74,222,128,0.9)' }}>✓</span>}
+                                {!!e.confirmed && <span style={{ marginLeft: 6, fontSize: facSize - 2, color: 'rgba(74,222,128,0.9)' }}>✓</span>}
                               </div>
                               <div style={{ fontSize: progSize, opacity: 0.62, lineHeight: 1.2 }}>
                                 {e.program_name}
@@ -228,7 +230,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             </div>
 
             {/* Quote */}
-            {settings.show_quote && student.quote && quoteApproved && (
+            {!!settings.show_quote && !!student.quote && quoteApproved && (
               <div style={{
                 fontSize: 18, fontStyle: 'italic', textAlign: 'center',
                 opacity: 0.75, lineHeight: 1.6, maxWidth: 360,

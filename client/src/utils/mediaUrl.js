@@ -17,7 +17,11 @@ const API_ORIGIN = getApiOrigin();
 
 export function resolveMediaUrl(src) {
   if (!src || typeof src !== 'string') return src;
-  if (src.startsWith('data:') || src.startsWith('blob:')) return src;
+  // กัน data: URL ก้อนใหญ่ (เช่น base64 ที่เผลอ paste ลง DB) ที่ทำให้ browser แครชตอน decode
+  if (src.startsWith('data:')) return '';
+  // กันค่ายาวผิดปกติ (ไม่ใช่ path/URL รูปปกติ)
+  if (src.length > 2048) return '';
+  if (src.startsWith('blob:')) return src;
   if (src.startsWith('http://') || src.startsWith('https://')) return src;
 
   if (src.startsWith('/uploads/')) {
