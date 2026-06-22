@@ -185,7 +185,7 @@ export default function AdmissionTableReportPage() {
   // ── Export PDF (print tab) ──
   const exportPdf = () => {
     localStorage.setItem('gradtrack-table-print-data', JSON.stringify({ flatRows, yearName }));
-    window.open('/admin/report-table/print', '_blank');
+    window.open(`${import.meta.env.BASE_URL}admin/report-table/print`, '_blank');
   };
 
   const totalStudents = students.length;

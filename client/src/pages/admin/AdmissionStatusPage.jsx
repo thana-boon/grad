@@ -203,13 +203,22 @@ export default function AdmissionStatusPage() {
 
   const getUniversityLabel = (u) => u?.name || u?.name_th || u?.name_en || u?.short_name || `มหาวิทยาลัย #${u?.id}`;
 
+  // จำนวนที่ยืนยันสิทธิ์ของนักเรียนแต่ละคน
+  const confirmedCount = (s) => s.admissions.filter(a => a.confirmed).length;
+
   // สรุปจำนวน
   const counts = { all: students.length, none: 0, pending: 0, confirmed: 0 };
   for (const s of students) counts[s.status]++;
+  // นักเรียนที่ยืนยันสิทธิ์มากกว่า 1 ที่ (ผิดหลักเกณฑ์ — มักเกิดจากตอน import)
+  const multiConfirm = students.filter(s => confirmedCount(s) > 1);
 
   // filter + search
   const filtered = students.filter(s => {
-    if (filter !== 'all' && s.status !== filter) return false;
+    if (filter === 'multi') {
+      if (confirmedCount(s) <= 1) return false;
+    } else if (filter !== 'all' && s.status !== filter) {
+      return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       return (
@@ -270,6 +279,24 @@ export default function AdmissionStatusPage() {
         ))}
       </div>
 
+      {/* ── ปุ่มตรวจสอบนักเรียนที่ยืนยันสิทธิ์เกิน 1 ที่ ── */}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setFilter(filter === 'multi' ? 'all' : 'multi')}
+          className={`btn btn-sm gap-2 ${multiConfirm.length > 0 ? 'btn-error' : 'btn-ghost'} ${filter === 'multi' ? '' : 'opacity-70'}`}
+          disabled={multiConfirm.length === 0}
+          title="นักเรียนที่ยืนยันสิทธิ์มากกว่า 1 ที่ ซึ่งผิดหลักเกณฑ์ (มักเกิดจากตอน import)"
+        >
+          ⚠️ ยืนยันสิทธิ์เกิน 1 ที่
+          <span className="badge badge-sm badge-neutral font-bold">{multiConfirm.length}</span>
+        </button>
+        {multiConfirm.length > 0 && (
+          <span className="text-xs text-error/80">
+            พบนักเรียน {multiConfirm.length} คนที่ยืนยันสิทธิ์เกิน 1 ที่ — คลิกเพื่อดูและแก้ไข
+          </span>
+        )}
+      </div>
+
       {/* ── ตาราง ── */}
       {loading ? (
         <div className="flex justify-center py-10">
@@ -294,10 +321,12 @@ export default function AdmissionStatusPage() {
             <tbody>
               {filtered.map((s, i) => {
                 const st = STATUS_LABEL[s.status];
+                const nConfirmed = confirmedCount(s);
+                const overConfirmed = nConfirmed > 1;
                 return (
                   <tr
                     key={s.student_code}
-                    className="hover:bg-base-200 transition-colors cursor-pointer"
+                    className={`hover:bg-base-200 transition-colors cursor-pointer ${overConfirmed ? 'bg-error/10' : ''}`}
                     onClick={() => openModal(s)}
                   >
                     <td className="text-base-content/40">{i + 1}</td>
@@ -312,6 +341,11 @@ export default function AdmissionStatusPage() {
                     </td>
                     <td className="text-base-content/50 text-xs">
                       {s.admissions.length > 0 ? `${s.admissions.length} แห่ง` : '—'}
+                      {overConfirmed && (
+                        <span className="badge badge-error badge-sm gap-1 ml-1 whitespace-nowrap">
+                          ⚠️ ยืนยัน {nConfirmed} ที่
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -363,6 +397,16 @@ export default function AdmissionStatusPage() {
                   {!photoUploading && '🖼️'} ใส่รูป
                 </button>
               </div>
+
+              {/* แจ้งเตือนยืนยันสิทธิ์เกิน 1 ที่ */}
+              {confirmedCount(selected) > 1 && (
+                <div className="alert alert-error text-sm mb-3 py-2">
+                  <span>
+                    ⚠️ นักเรียนคนนี้ยืนยันสิทธิ์ <b>{confirmedCount(selected)}</b> ที่
+                    ซึ่งผิดหลักเกณฑ์ (ยืนยันได้เพียง 1 ที่) — โปรดยกเลิกยืนยันรายการที่เกินด้วยปุ่ม ↩️
+                  </span>
+                </div>
+              )}
 
               {/* รายการ admissions */}
               {selected.admissions.length === 0 ? (
