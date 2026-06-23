@@ -34,6 +34,9 @@ async function ensureTable() {
     "ALTER TABLE report_settings ADD COLUMN photo_offset_y INT NOT NULL DEFAULT 0",
     "ALTER TABLE report_settings ADD COLUMN name_bg_color VARCHAR(20) DEFAULT '#000000'",
     "ALTER TABLE report_settings ADD COLUMN name_bg_opacity INT NOT NULL DEFAULT 0",
+    "ALTER TABLE report_settings ADD COLUMN info_offset_y INT NOT NULL DEFAULT 0",
+    "ALTER TABLE report_settings ADD COLUMN confirm_color VARCHAR(20) DEFAULT '#22c55e'",
+    "ALTER TABLE report_settings ADD COLUMN confirm_opacity INT NOT NULL DEFAULT 22",
   ]) {
     await db.query(col).catch(() => {});
   }
@@ -71,15 +74,18 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── PUT /api/report-settings ─────────────────────────────────────────────────
 router.put('/', verifyToken, adminOnly, async (req, res) => {
-  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale, photo_overflow, photo_offset_y, name_bg_color, name_bg_opacity } = req.body;
+  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale, photo_overflow, photo_offset_y, name_bg_color, name_bg_opacity, info_offset_y, confirm_color, confirm_opacity } = req.body;
   // จำกัดช่วงค่ากันเพี้ยน
-  const scale   = Math.min(300, Math.max(50, Number(photo_scale) || 100));
-  const offsetY = Math.min(300, Math.max(-300, Number(photo_offset_y) || 0));
-  const nameOp  = Math.min(100, Math.max(0, Number(name_bg_opacity) || 0));
+  const scale     = Math.min(300, Math.max(50, Number(photo_scale) || 100));
+  const offsetY   = Math.min(300, Math.max(-300, Number(photo_offset_y) || 0));
+  const nameOp    = Math.min(100, Math.max(0, Number(name_bg_opacity) || 0));
+  const infoY     = Math.min(300, Math.max(-300, Number(info_offset_y) || 0));
+  const _co       = Number(confirm_opacity);
+  const confirmOp = Math.min(100, Math.max(0, Number.isFinite(_co) ? _co : 22));
   try {
     await db.query(
-      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ?, photo_overflow = ?, photo_offset_y = ?, name_bg_color = ?, name_bg_opacity = ? WHERE id = 1',
-      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale, photo_overflow ? 1 : 0, offsetY, name_bg_color ?? '#000000', nameOp]
+      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ?, photo_overflow = ?, photo_offset_y = ?, name_bg_color = ?, name_bg_opacity = ?, info_offset_y = ?, confirm_color = ?, confirm_opacity = ? WHERE id = 1',
+      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale, photo_overflow ? 1 : 0, offsetY, name_bg_color ?? '#000000', nameOp, infoY, confirm_color ?? '#22c55e', confirmOp]
     );
     res.json({ ok: true });
   } catch (err) {

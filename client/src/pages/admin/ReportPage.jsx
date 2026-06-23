@@ -56,6 +56,11 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
   const photoOffsetY = Number(settings.photo_offset_y) || 0;
   const nameBgOpacity = Number(settings.name_bg_opacity) || 0;
   const nameBg = nameBgOpacity > 0 ? hexToRgba(settings.name_bg_color, nameBgOpacity) : 'transparent';
+  const infoOffsetY = Number(settings.info_offset_y) || 0;
+  const confirmColor = settings.confirm_color || '#22c55e';
+  const confirmOpacity = Number.isFinite(Number(settings.confirm_opacity)) ? Number(settings.confirm_opacity) : 22;
+  const confirmBg = hexToRgba(confirmColor, confirmOpacity);
+  const confirmBorder = hexToRgba(confirmColor, 80);
 
   const fullName = `${student.title_prefix || ''}${student.first_name || ''} ${student.last_name || ''}`;
   const nameFontSize = fullName.length <= 18 ? 38
@@ -169,8 +174,8 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                     const isConfirmed = !!g.groupConfirmed;
                     return (
                       <div key={g.university_id || g.university_name} style={{
-                        background: isConfirmed ? 'rgba(34,197,94,0.22)' : 'rgba(255,255,255,0.1)',
-                        border: isConfirmed ? '1.5px solid rgba(34,197,94,0.7)' : '1px solid rgba(255,255,255,0.12)',
+                        background: isConfirmed ? confirmBg : 'rgba(255,255,255,0.1)',
+                        border: isConfirmed ? `1.5px solid ${confirmBorder}` : '1px solid rgba(255,255,255,0.12)',
                         borderRadius: 12,
                         padding: L.pad,
                         display: 'flex',
@@ -244,44 +249,51 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
               }
             </div>
 
-            {/* Name */}
+            {/* Name + Quote + กล่องยืนยัน — เลื่อนขึ้น/ลงพร้อมกัน */}
             <div style={{
-              fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
-              background: nameBg,
-              padding: nameBgOpacity > 0 ? '8px 22px' : 0,
-              borderRadius: nameBgOpacity > 0 ? 14 : 0,
-              maxWidth: '100%', boxSizing: 'border-box',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+              width: '100%', boxSizing: 'border-box',
+              transform: `translateY(${infoOffsetY}px)`,
             }}>
-              {fullName}
+              {/* Name */}
+              <div style={{
+                fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
+                background: nameBg,
+                padding: nameBgOpacity > 0 ? '8px 22px' : 0,
+                borderRadius: nameBgOpacity > 0 ? 14 : 0,
+                maxWidth: '100%', boxSizing: 'border-box',
+              }}>
+                {fullName}
+              </div>
+
+              {/* Quote */}
+              {!!settings.show_quote && !!student.quote && quoteApproved && (
+                <div style={{
+                  fontSize: 18, fontStyle: 'italic', textAlign: 'center',
+                  opacity: 0.75, lineHeight: 1.6, maxWidth: 360,
+                }}>
+                  "{student.quote}"
+                </div>
+              )}
+
+              {/* Confirmed badge */}
+              {confirmedUni && (
+                <div style={{
+                  background: confirmBg,
+                  border: `2px solid ${confirmBorder}`,
+                  borderRadius: 14, padding: '12px 16px',
+                  textAlign: 'center', width: '100%', boxSizing: 'border-box',
+                }}>
+                  <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
+                    {confirmedUni.university_name}
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.8, marginTop: 3 }}>
+                    {confirmedUni.faculty_name}
+                  </div>
+                </div>
+              )}
             </div>
-
-            {/* Quote */}
-            {!!settings.show_quote && !!student.quote && quoteApproved && (
-              <div style={{
-                fontSize: 18, fontStyle: 'italic', textAlign: 'center',
-                opacity: 0.75, lineHeight: 1.6, maxWidth: 360,
-              }}>
-                "{student.quote}"
-              </div>
-            )}
-
-            {/* Confirmed badge */}
-            {confirmedUni && (
-              <div style={{
-                background: 'rgba(34,197,94,0.22)',
-                border: '2px solid rgba(34,197,94,0.8)',
-                borderRadius: 14, padding: '12px 16px',
-                textAlign: 'center', width: '100%', boxSizing: 'border-box',
-              }}>
-                <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
-                <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
-                  {confirmedUni.university_name}
-                </div>
-                <div style={{ fontSize: 13, opacity: 0.8, marginTop: 3 }}>
-                  {confirmedUni.faculty_name}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -291,7 +303,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
-  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0 });
+  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0, info_offset_y: 0, confirm_color: '#22c55e', confirm_opacity: 22 });
   const [students, setStudents] = useState([]);
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -354,6 +366,9 @@ export default function ReportPage() {
         photo_offset_y: settings.photo_offset_y,
         name_bg_color: settings.name_bg_color,
         name_bg_opacity: settings.name_bg_opacity,
+        info_offset_y: settings.info_offset_y,
+        confirm_color: settings.confirm_color,
+        confirm_opacity: settings.confirm_opacity,
       });
     } finally {
       setSaving(false);
@@ -668,6 +683,34 @@ export default function ReportPage() {
                   <span>ลง</span>
                 </div>
               </div>
+
+              {/* Info offset Y — เลื่อนชื่อ + กล่องมหาลัยที่ยืนยัน ขึ้น/ลงพร้อมกัน */}
+              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="label-text text-xs">เลื่อนชื่อ + มหาลัยที่ยืนยัน ขึ้น/ลง</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold tabular-nums">{settings.info_offset_y ?? 0}px</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => setSettings(p => ({ ...p, info_offset_y: 0 }))}
+                    >รีเซ็ต</button>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={-300}
+                  max={300}
+                  step={5}
+                  value={settings.info_offset_y ?? 0}
+                  onChange={e => setSettings(p => ({ ...p, info_offset_y: Number(e.target.value) }))}
+                  className="range range-primary range-xs"
+                />
+                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                  <span>ขึ้น</span>
+                  <span>กลาง</span>
+                  <span>ลง</span>
+                </div>
+              </div>
             </section>
 
             <div className="divider my-0" />
@@ -724,6 +767,43 @@ export default function ReportPage() {
                   step={5}
                   value={settings.name_bg_opacity ?? 0}
                   onChange={e => setSettings(p => ({ ...p, name_bg_opacity: Number(e.target.value) }))}
+                  className="range range-primary range-xs"
+                />
+                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                  <span>โปร่งใส 0%</span>
+                  <span>ทึบ 100%</span>
+                </div>
+              </div>
+
+              {/* Confirmed university background — สี + ความทึบ */}
+              <div className="form-control gap-2 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="label-text text-xs">พื้นหลังมหาลัยที่ยืนยัน</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={settings.confirm_color || '#22c55e'}
+                      onChange={e => setSettings(p => ({ ...p, confirm_color: e.target.value }))}
+                      className="w-9 h-9 rounded cursor-pointer border border-base-300"
+                      style={{ padding: 2 }}
+                    />
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => setSettings(p => ({ ...p, confirm_color: '#22c55e', confirm_opacity: 22 }))}
+                    >รีเซ็ต</button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="label-text text-xs">ความทึบ</span>
+                  <span className="text-xs font-semibold tabular-nums">{settings.confirm_opacity ?? 22}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={settings.confirm_opacity ?? 22}
+                  onChange={e => setSettings(p => ({ ...p, confirm_opacity: Number(e.target.value) }))}
                   className="range range-primary range-xs"
                 />
                 <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
