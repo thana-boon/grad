@@ -67,7 +67,9 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
     : fullName.length <= 22 ? 32
     : fullName.length <= 27 ? 27
     : fullName.length <= 33 ? 23
-    : 19;
+    : fullName.length <= 40 ? 19
+    : fullName.length <= 48 ? 16
+    : 14;
 
   return (
     <div style={{
@@ -262,6 +264,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                 padding: nameBgOpacity > 0 ? '8px 22px' : 0,
                 borderRadius: nameBgOpacity > 0 ? 14 : 0,
                 maxWidth: '100%', boxSizing: 'border-box',
+                whiteSpace: 'nowrap',
               }}>
                 {fullName}
               </div>
