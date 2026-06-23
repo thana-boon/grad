@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { resolveMediaUrl } from '../utils/mediaUrl';
+import PhotoUploadDialog from '../components/PhotoUploadDialog';
 
 // ── Custom Confirm Dialog ─────────────────────────────────────────────────────
 function ConfirmDialog({ open, title, message, confirmLabel = 'ยืนยัน', confirmClass = 'btn-error', onConfirm, onCancel }) {
@@ -358,6 +359,7 @@ export default function StudentPage() {
   // ── Photo ──
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoUrl, setPhotoUrl] = useState(user?.photo_url || null);
+  const [pendingPhoto, setPendingPhoto] = useState(null);
   const fileInputRef = useRef(null);
 
   // ── Toast ──
@@ -471,9 +473,14 @@ export default function StudentPage() {
     }
   };
 
-  const handlePhotoChange = async (e) => {
+  const handlePhotoChange = (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    setPendingPhoto(file);
+  };
+
+  const uploadPhotoFile = async (file) => {
     setUploadingPhoto(true);
     try {
       const formData = new FormData();
@@ -484,11 +491,11 @@ export default function StudentPage() {
       setPhotoUrl(res.data.photo_url);
       login({ ...user, photo_url: res.data.photo_url }, localStorage.getItem('token'));
       showToast('อัปโหลดรูปสำเร็จ 🎉');
+      setPendingPhoto(null);
     } catch {
       showToast('อัปโหลดรูปไม่สำเร็จ', 'error');
     } finally {
       setUploadingPhoto(false);
-      e.target.value = '';
     }
   };
 
@@ -505,6 +512,15 @@ export default function StudentPage() {
         confirmClass={dialog?.confirmClass}
         onConfirm={dialog?.onConfirm}
         onCancel={closeDialog}
+      />
+
+      {/* Photo upload + background removal */}
+      <PhotoUploadDialog
+        key={pendingPhoto?.name + pendingPhoto?.lastModified}
+        file={pendingPhoto}
+        uploading={uploadingPhoto}
+        onCancel={() => setPendingPhoto(null)}
+        onConfirm={uploadPhotoFile}
       />
 
       {/* Toast */}
@@ -554,7 +570,7 @@ export default function StudentPage() {
 
         {/* Name */}
         <div className="text-center">
-          <h1 className="text-2xl font-bold">{user?.first_name} {user?.last_name}</h1>
+          <h1 className="text-2xl font-bold">{user?.title_prefix}{user?.first_name} {user?.last_name}</h1>
           <p className="text-base-content/50 text-sm mt-1">
             รหัส {user?.username} · {user?.class_level} ห้อง {user?.class_room}
           </p>

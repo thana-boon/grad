@@ -24,6 +24,7 @@ router.get('/', verifyToken, async (req, res) => {
       )
       .map((s) => ({
         student_code: s.student_code,
+        title_prefix: s.title_prefix,
         first_name: s.first_name,
         last_name: s.last_name,
         class_level: s.class_level,

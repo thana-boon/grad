@@ -175,7 +175,7 @@ export default function UniversityStudentsPage() {
                     <td className="font-mono text-xs">{r.student_code}</td>
                     <td className="whitespace-nowrap">
                       {r.student
-                        ? <span className="font-medium text-sm">{r.student.first_name} {r.student.last_name}</span>
+                        ? <span className="font-medium text-sm">{r.student.title_prefix}{r.student.first_name} {r.student.last_name}</span>
                         : <span className="text-base-content/30 text-xs italic">ไม่พบข้อมูลนักเรียน</span>}
                     </td>
                     <td className="text-xs text-base-content/60 whitespace-nowrap">

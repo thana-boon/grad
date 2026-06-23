@@ -196,7 +196,7 @@ export default function StudentsPage() {
                 <tr key={`${s.student_code}-${i}`}>
                   <td className="text-base-content/40 text-xs">{i + 1}</td>
                   <td className="font-mono text-xs">{s.student_code}</td>
-                  <td>{s.first_name}</td>
+                  <td>{s.title_prefix}{s.first_name}</td>
                   <td>{s.last_name}</td>
                   <td>
                     <span className="badge badge-outline badge-sm">{s.class_level}</span>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
+import PhotoUploadDialog from '../../components/PhotoUploadDialog';
 
 const STATUS_LABEL = {
   none: { label: 'ยังไม่บันทึก', badge: 'badge-error', icon: '❌' },
@@ -39,6 +40,7 @@ export default function AdmissionStatusPage() {
   const [addLoading, setAddLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null); // id ของ admission ที่กำลัง action
   const [photoUploading, setPhotoUploading] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState(null);
 
   const loadData = () => setReloadToken(t => t + 1);
 
@@ -162,10 +164,15 @@ export default function AdmissionStatusPage() {
     }
   };
 
-  const handleAdminUploadPhoto = async (e) => {
+  const handleAdminUploadPhoto = (e) => {
     const file = e.target.files?.[0];
-    if (!file || !selected) return;
     e.target.value = '';
+    if (!file || !selected) return;
+    setPendingPhoto(file);
+  };
+
+  const uploadAdminPhotoFile = async (file) => {
+    if (!selected) return;
     const formData = new FormData();
     formData.append('photo', file);
     formData.append('year_id', String(yearId || '0'));
@@ -175,6 +182,7 @@ export default function AdmissionStatusPage() {
       await api.post(`/student/admin/students/${selected.student_code}/photo`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      setPendingPhoto(null);
       loadData();
     } catch (err) {
       alert(err.response?.data?.message || err.message);
@@ -331,7 +339,7 @@ export default function AdmissionStatusPage() {
                   >
                     <td className="text-base-content/40">{i + 1}</td>
                     <td className="font-mono">{s.student_code}</td>
-                    <td>{s.first_name} {s.last_name}</td>
+                    <td>{s.title_prefix}{s.first_name} {s.last_name}</td>
                     <td>{s.class_level}</td>
                     <td>{s.class_room}</td>
                     <td>
@@ -363,7 +371,7 @@ export default function AdmissionStatusPage() {
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="font-bold text-lg">{selected.first_name} {selected.last_name}</h3>
+                  <h3 className="font-bold text-lg">{selected.title_prefix}{selected.first_name} {selected.last_name}</h3>
                   <p className="text-sm text-base-content/60 font-mono">
                     รหัส {selected.student_code} · ม.{selected.class_level}/{selected.class_room}
                   </p>
@@ -396,6 +404,13 @@ export default function AdmissionStatusPage() {
                 >
                   {!photoUploading && '🖼️'} ใส่รูป
                 </button>
+                <PhotoUploadDialog
+                  key={pendingPhoto?.name + pendingPhoto?.lastModified}
+                  file={pendingPhoto}
+                  uploading={photoUploading}
+                  onCancel={() => setPendingPhoto(null)}
+                  onConfirm={uploadAdminPhotoFile}
+                />
               </div>
 
               {/* แจ้งเตือนยืนยันสิทธิ์เกิน 1 ที่ */}

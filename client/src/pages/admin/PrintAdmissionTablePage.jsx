@@ -81,7 +81,7 @@ export default function PrintAdmissionTablePage() {
                   <td rowSpan={r.rowSpan} style={{ textAlign: 'center' }}>{r.class_room}</td>
                   <td rowSpan={r.rowSpan} style={{ textAlign: 'center' }}>{r.number_in_room}</td>
                   <td rowSpan={r.rowSpan} style={{ fontFamily: 'monospace' }}>{r.student_code}</td>
-                  <td rowSpan={r.rowSpan} style={{ fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'left' }}>{r.first_name} {r.last_name}</td>
+                  <td rowSpan={r.rowSpan} style={{ fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'left' }}>{r.title_prefix}{r.first_name} {r.last_name}</td>
                 </>
               )}
               <td style={{ textAlign: 'left' }}>{r.university_name || <span className="dim">-</span>}</td>

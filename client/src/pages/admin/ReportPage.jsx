@@ -40,8 +40,9 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
   const L = getUniLayout(grouped.length);
   const textColor = settings.text_color || '#ffffff';
+  const showFrame = settings.show_photo_frame === undefined ? true : !!settings.show_photo_frame;
 
-  const fullName = `${student.first_name || ''} ${student.last_name || ''}`;
+  const fullName = `${student.title_prefix || ''}${student.first_name || ''} ${student.last_name || ''}`;
   const nameFontSize = fullName.length <= 18 ? 38
     : fullName.length <= 22 ? 32
     : fullName.length <= 27 ? 27
@@ -209,9 +210,11 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             {/* Photo */}
             <div style={{
               width: 240, height: 360,
-              borderRadius: 20, overflow: 'hidden',
-              border: `4px solid ${textColor}dd`,
-              background: '#555', position: 'relative', flexShrink: 0,
+              borderRadius: showFrame ? 20 : 0,
+              overflow: 'hidden',
+              border: showFrame ? `4px solid ${textColor}dd` : 'none',
+              background: showFrame ? '#555' : 'transparent',
+              position: 'relative', flexShrink: 0,
             }}>
               {student.photo_url
                 ? <img
@@ -226,7 +229,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
             {/* Name */}
             <div style={{ fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor }}>
-              {student.first_name} {student.last_name}
+              {fullName}
             </div>
 
             {/* Quote */}
@@ -265,7 +268,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
-  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff' });
+  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true });
   const [students, setStudents] = useState([]);
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -322,6 +325,7 @@ export default function ReportPage() {
         show_quote: settings.show_quote,
         school_name: settings.school_name,
         text_color: settings.text_color,
+        show_photo_frame: settings.show_photo_frame,
       });
     } finally {
       setSaving(false);
@@ -479,118 +483,174 @@ export default function ReportPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
         {/* ── Settings Panel ── */}
-        <div className="card bg-base-100 shadow border border-base-300 p-4 flex flex-col gap-4 h-fit">
-          <h2 className="font-semibold text-base">⚙️ ตั้งค่ารายงาน</h2>
+        <div className="card bg-base-100 shadow border border-base-300 h-fit overflow-hidden">
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-base-300 bg-base-200/50">
+            <h2 className="font-semibold text-base">⚙️ ตั้งค่ารายงาน</h2>
+          </div>
 
-          {/* School logo */}
-          <div className="form-control gap-2">
-            <label className="label py-0"><span className="label-text text-xs">Logo โรงเรียน</span></label>
-            {settings.school_logo_url ? (
-              <div className="flex flex-col gap-2 items-center">
-                <img
-                  src={resolveMediaUrl(settings.school_logo_url)}
-                  alt="school logo"
-                  className="w-24 h-24 object-contain rounded-lg border border-base-300 bg-base-200 p-1"
-                />
-                <button className="btn btn-error btn-xs" onClick={removeSchoolLogo}>🗑️ ลบ Logo</button>
+          <div className="p-4 flex flex-col gap-5">
+
+            {/* ── Section: โรงเรียน ── */}
+            <section className="flex flex-col gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">🏫 โรงเรียน</p>
+
+              {/* School logo — compact row */}
+              <div className="flex items-center gap-3">
+                <div className="w-16 h-16 shrink-0 rounded-lg border border-base-300 bg-base-200 flex items-center justify-center overflow-hidden">
+                  {settings.school_logo_url
+                    ? <img src={resolveMediaUrl(settings.school_logo_url)} alt="logo" className="w-full h-full object-contain p-1" />
+                    : <span className="text-2xl opacity-30">🏫</span>}
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="text-xs text-base-content/60">โลโก้โรงเรียน</span>
+                  <div className="flex gap-1">
+                    <button
+                      className="btn btn-outline btn-xs"
+                      onClick={() => logoInputRef.current?.click()}
+                      disabled={logoUploading}
+                    >
+                      {logoUploading ? <span className="loading loading-spinner loading-xs" /> : (settings.school_logo_url ? 'เปลี่ยน' : 'อัพโหลด')}
+                    </button>
+                    {settings.school_logo_url && (
+                      <button className="btn btn-ghost btn-xs text-error" onClick={removeSchoolLogo}>ลบ</button>
+                    )}
+                  </div>
+                </div>
+                <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={uploadSchoolLogo} />
               </div>
-            ) : (
-              <button
-                className="btn btn-outline btn-sm"
-                onClick={() => logoInputRef.current?.click()}
-                disabled={logoUploading}
-              >
-                {logoUploading ? <span className="loading loading-spinner loading-xs" /> : '🏫 อัพโหลด Logo โรงเรียน'}
-              </button>
-            )}
-            <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={uploadSchoolLogo} />
-          </div>
 
-          {/* School name */}
-          <div className="form-control gap-1">
-            <label className="label py-0"><span className="label-text text-xs">ชื่อโรงเรียน</span></label>
-            <input
-              type="text"
-              className="input input-bordered input-sm text-sm"
-              value={settings.school_name || ''}
-              onChange={e => setSettings(p => ({ ...p, school_name: e.target.value }))}
-              placeholder="โรงเรียน..."
-            />
-          </div>
+              {/* School name */}
+              <div className="form-control gap-1">
+                <label className="label py-0"><span className="label-text text-xs">ชื่อโรงเรียน</span></label>
+                <input
+                  type="text"
+                  className="input input-bordered input-sm text-sm"
+                  value={settings.school_name || ''}
+                  onChange={e => setSettings(p => ({ ...p, school_name: e.target.value }))}
+                  placeholder="โรงเรียน..."
+                />
+              </div>
+            </section>
 
-          {/* Congrats text */}
-          <div className="form-control gap-1">
-            <label className="label py-0"><span className="label-text text-xs">ข้อความแสดงความยินดี</span></label>
-            <textarea
-              className="textarea textarea-bordered textarea-sm text-sm"
-              rows={3}
-              value={settings.congrats_text || ''}
-              onChange={e => setSettings(p => ({ ...p, congrats_text: e.target.value }))}
-              placeholder="ขอแสดงความยินดี..."
-            />
-          </div>
+            <div className="divider my-0" />
 
-          {/* Show quote toggle */}
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              className="toggle toggle-primary toggle-sm"
-              checked={!!settings.show_quote}
-              onChange={e => setSettings(p => ({ ...p, show_quote: e.target.checked }))}
-            />
-            <span className="text-sm">แสดงคำคม</span>
-          </label>
+            {/* ── Section: เนื้อหาบนการ์ด ── */}
+            <section className="flex flex-col gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">📝 เนื้อหาบนการ์ด</p>
 
-          {/* Text color */}
-          <div className="form-control gap-1">
-            <label className="label py-0"><span className="label-text text-xs">สีตัวอักษร</span></label>
-            <div className="flex items-center gap-3">
-              <input
-                type="color"
-                value={settings.text_color || '#ffffff'}
-                onChange={e => setSettings(p => ({ ...p, text_color: e.target.value }))}
-                className="w-10 h-10 rounded cursor-pointer border border-base-300"
-                style={{ padding: 2 }}
-              />
-              <span className="text-xs opacity-60">{settings.text_color || '#ffffff'}</span>
-              <button
-                className="btn btn-ghost btn-xs"
-                onClick={() => setSettings(p => ({ ...p, text_color: '#ffffff' }))}
-              >รีเซ็ต</button>
-            </div>
-          </div>
+              {/* Congrats text */}
+              <div className="form-control gap-1">
+                <label className="label py-0"><span className="label-text text-xs">ข้อความแสดงความยินดี</span></label>
+                <textarea
+                  className="textarea textarea-bordered textarea-sm text-sm"
+                  rows={3}
+                  value={settings.congrats_text || ''}
+                  onChange={e => setSettings(p => ({ ...p, congrats_text: e.target.value }))}
+                  placeholder="ขอแสดงความยินดี..."
+                />
+              </div>
 
-          {/* Background image */}
-          <div className="form-control gap-2">
-            <label className="label py-0"><span className="label-text text-xs">ภาพพื้นหลัง</span></label>
-            {settings.background_image_url ? (
+              {/* Toggles group */}
               <div className="flex flex-col gap-2">
-                <img
-                  src={resolveMediaUrl(settings.background_image_url)}
-                  alt="background"
-                  className="w-full h-28 object-cover rounded-lg border border-base-300"
-                />
-                <button className="btn btn-error btn-xs" onClick={removeBg}>🗑️ ลบภาพพื้นหลัง</button>
+                {[
+                  { key: 'show_quote', label: 'แสดงคำคม' },
+                  { key: 'show_photo_frame', label: 'แสดงกรอบรูปนักเรียน' },
+                ].map(({ key, label }) => {
+                  const on = !!settings[key];
+                  return (
+                    <label
+                      key={key}
+                      className={`flex items-center justify-between gap-3 cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${
+                        on
+                          ? 'border-primary/60 bg-primary/10'
+                          : 'border-base-300 bg-base-200/40 hover:border-base-content/20'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2 text-sm">
+                        <span className={`text-xs font-bold w-9 text-center rounded px-1 py-0.5 ${on ? 'bg-primary text-primary-content' : 'bg-base-300 text-base-content/50'}`}>
+                          {on ? 'เปิด' : 'ปิด'}
+                        </span>
+                        <span className={on ? 'font-semibold' : 'text-base-content/70'}>{label}</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-primary toggle-sm"
+                        checked={on}
+                        onChange={e => setSettings(p => ({ ...p, [key]: e.target.checked }))}
+                      />
+                    </label>
+                  );
+                })}
               </div>
-            ) : (
-              <button
-                className="btn btn-outline btn-sm"
-                onClick={() => bgInputRef.current?.click()}
-                disabled={bgUploading}
-              >
-                {bgUploading ? <span className="loading loading-spinner loading-xs" /> : '📷 เลือกภาพพื้นหลัง'}
-              </button>
-            )}
-            <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={uploadBg} />
+            </section>
+
+            <div className="divider my-0" />
+
+            {/* ── Section: รูปแบบ & ดีไซน์ ── */}
+            <section className="flex flex-col gap-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">🎨 รูปแบบ & ดีไซน์</p>
+
+              {/* Text color */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="label-text text-xs">สีตัวอักษร</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs opacity-50">{settings.text_color || '#ffffff'}</span>
+                  <input
+                    type="color"
+                    value={settings.text_color || '#ffffff'}
+                    onChange={e => setSettings(p => ({ ...p, text_color: e.target.value }))}
+                    className="w-9 h-9 rounded cursor-pointer border border-base-300"
+                    style={{ padding: 2 }}
+                  />
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setSettings(p => ({ ...p, text_color: '#ffffff' }))}
+                  >รีเซ็ต</button>
+                </div>
+              </div>
+
+              {/* Background image */}
+              <div className="form-control gap-2">
+                <label className="label py-0"><span className="label-text text-xs">ภาพพื้นหลัง</span></label>
+                {settings.background_image_url ? (
+                  <div className="relative group">
+                    <img
+                      src={resolveMediaUrl(settings.background_image_url)}
+                      alt="background"
+                      className="w-full h-28 object-cover rounded-lg border border-base-300"
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 group-hover:bg-black/40 transition rounded-lg opacity-0 group-hover:opacity-100">
+                      <button className="btn btn-xs" onClick={() => bgInputRef.current?.click()} disabled={bgUploading}>
+                        {bgUploading ? <span className="loading loading-spinner loading-xs" /> : 'เปลี่ยน'}
+                      </button>
+                      <button className="btn btn-error btn-xs" onClick={removeBg}>ลบ</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => bgInputRef.current?.click()}
+                    disabled={bgUploading}
+                  >
+                    {bgUploading ? <span className="loading loading-spinner loading-xs" /> : '📷 เลือกภาพพื้นหลัง'}
+                  </button>
+                )}
+                <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={uploadBg} />
+              </div>
+            </section>
           </div>
 
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={saveSettings}
-            disabled={saving}
-          >
-            {saving ? <span className="loading loading-spinner loading-xs" /> : '💾 บันทึกการตั้งค่า'}
-          </button>
+          {/* Sticky save footer */}
+          <div className="px-4 py-3 border-t border-base-300 bg-base-200/50">
+            <button
+              className="btn btn-primary btn-sm w-full"
+              onClick={saveSettings}
+              disabled={saving}
+            >
+              {saving ? <span className="loading loading-spinner loading-xs" /> : '💾 บันทึกการตั้งค่า'}
+            </button>
+          </div>
         </div>
 
         {/* ── Preview Panel ── */}
@@ -606,7 +666,7 @@ export default function ReportPage() {
                   placeholder="เลือกนักเรียน..."
                   options={students.map((s, i) => ({
                     value: i,
-                    label: `${s.first_name} ${s.last_name} (${s.student_code})`,
+                    label: `${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
                   }))}
                 />
               )}
@@ -637,14 +697,16 @@ export default function ReportPage() {
 
           {/* ── Export Section ── */}
           <div className="card bg-base-100 shadow border border-base-300 p-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex-1">
-                <p className="text-sm font-medium">
-                  นักเรียนที่บันทึกผล <span className="font-bold text-primary">{students.length}</span> คน
-                </p>
-                <p className="text-xs text-base-content/50">
-                  (เฉพาะที่มีการบันทึกมหาวิทยาลัยแล้ว)
-                </p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="flex flex-col items-center justify-center w-16 shrink-0 rounded-lg bg-primary/10 py-1.5">
+                  <span className="text-2xl font-bold leading-none text-primary">{students.length}</span>
+                  <span className="text-[10px] text-base-content/60">คน</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">นักเรียนที่บันทึกผล</p>
+                  <p className="text-xs text-base-content/50">เฉพาะที่มีการบันทึกมหาวิทยาลัยแล้ว</p>
+                </div>
               </div>
 
               {/* Progress */}
@@ -655,21 +717,22 @@ export default function ReportPage() {
                 </div>
               )}
 
-              <button
-                className="btn btn-primary btn-sm gap-2"
-                onClick={exportZip}
-                disabled={exporting || students.length === 0}
-              >
-                📦 Export ZIP (รูปภาพ 1080×1080)
-              </button>
-
-              <button
-                className="btn btn-secondary btn-sm gap-2"
-                onClick={exportPdf}
-                disabled={exporting || students.length === 0}
-              >
-                📄 Export PDF
-              </button>
+              <div className="flex gap-2 w-full sm:w-auto">
+                <button
+                  className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={exportZip}
+                  disabled={exporting || students.length === 0}
+                >
+                  📦 Export ZIP
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={exportPdf}
+                  disabled={exporting || students.length === 0}
+                >
+                  📄 Export PDF
+                </button>
+              </div>
             </div>
           </div>
 
@@ -713,7 +776,7 @@ export default function ReportPage() {
                             }}
                           />
                           <div className="min-w-0">
-                            <p className="text-xs font-semibold">{s.first_name} {s.last_name} <span className="opacity-40">{s.student_code}</span></p>
+                            <p className="text-xs font-semibold">{s.title_prefix}{s.first_name} {s.last_name} <span className="opacity-40">{s.student_code}</span></p>
                             <p className="text-xs text-base-content/60 italic line-clamp-2">{s.quote}</p>
                           </div>
                         </label>

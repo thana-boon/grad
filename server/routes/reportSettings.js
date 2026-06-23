@@ -28,6 +28,7 @@ async function ensureTable() {
     "ALTER TABLE report_settings ADD COLUMN school_name VARCHAR(255) DEFAULT NULL",
     "ALTER TABLE report_settings ADD COLUMN school_logo_url VARCHAR(500) DEFAULT NULL",
     "ALTER TABLE report_settings ADD COLUMN text_color VARCHAR(20) DEFAULT '#ffffff'",
+    "ALTER TABLE report_settings ADD COLUMN show_photo_frame TINYINT(1) NOT NULL DEFAULT 1",
   ]) {
     await db.query(col).catch(() => {});
   }
@@ -65,11 +66,11 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── PUT /api/report-settings ─────────────────────────────────────────────────
 router.put('/', verifyToken, adminOnly, async (req, res) => {
-  const { congrats_text, show_quote, school_name, text_color } = req.body;
+  const { congrats_text, show_quote, school_name, text_color, show_photo_frame } = req.body;
   try {
     await db.query(
-      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ? WHERE id = 1',
-      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff']
+      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ? WHERE id = 1',
+      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0]
     );
     res.json({ ok: true });
   } catch (err) {

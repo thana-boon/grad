@@ -144,6 +144,7 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
 
     const students = m6.map((s) => ({
       student_code: s.student_code,
+      title_prefix: s.title_prefix,
       first_name: s.first_name,
       last_name: s.last_name,
       class_level: s.class_level,
@@ -252,6 +253,7 @@ router.post('/login', loginLimiter, async (req, res) => {
       user: {
         student_code: student.student_code,
         username: paddedCode,
+        title_prefix: student.title_prefix,
         first_name: student.first_name,
         last_name: student.last_name,
         class_level: student.class_level,
@@ -283,6 +285,7 @@ router.get('/profile', verifyToken, studentOnly, async (req, res) => {
 
     res.json({
       student_code: student.student_code,
+      title_prefix: student.title_prefix,
       first_name: student.first_name,
       last_name: student.last_name,
       class_level: student.class_level,
@@ -556,6 +559,7 @@ router.get('/admin/students-by-university', verifyToken, adminOnly, async (req, 
     const nameMap = new Map();
     const setInfo = (s) => {
       const info = {
+        title_prefix: s.title_prefix,
         first_name: s.first_name,
         last_name: s.last_name,
         class_level: s.class_level,
