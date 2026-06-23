@@ -346,6 +346,28 @@ router.post('/profile/photo', verifyToken, studentOnly, (req, res) => {
   });
 });
 
+// ─── DELETE /api/student/profile/photo ───────────────────────────────────────
+// นักเรียนลบรูปของตัวเอง
+router.delete('/profile/photo', verifyToken, studentOnly, async (req, res) => {
+  try {
+    await ensureProfileTable();
+    const code = req.user.student_code;
+    const [[old]] = await db.query(
+      'SELECT photo_url FROM student_profiles WHERE student_code = ?', [code]
+    );
+    if (old?.photo_url?.startsWith('/uploads/')) {
+      const oldPath = path.join(__dirname, '..', old.photo_url);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    await db.query(
+      'UPDATE student_profiles SET photo_url = NULL WHERE student_code = ?', [code]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── POST /api/student/admin/students/:student_code/photo ───────────────────
 // Admin: อัปโหลดรูปให้นักเรียน
 router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req, res) => {

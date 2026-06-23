@@ -30,6 +30,10 @@ async function ensureTable() {
     "ALTER TABLE report_settings ADD COLUMN text_color VARCHAR(20) DEFAULT '#ffffff'",
     "ALTER TABLE report_settings ADD COLUMN show_photo_frame TINYINT(1) NOT NULL DEFAULT 1",
     "ALTER TABLE report_settings ADD COLUMN photo_scale INT NOT NULL DEFAULT 100",
+    "ALTER TABLE report_settings ADD COLUMN photo_overflow TINYINT(1) NOT NULL DEFAULT 0",
+    "ALTER TABLE report_settings ADD COLUMN photo_offset_y INT NOT NULL DEFAULT 0",
+    "ALTER TABLE report_settings ADD COLUMN name_bg_color VARCHAR(20) DEFAULT '#000000'",
+    "ALTER TABLE report_settings ADD COLUMN name_bg_opacity INT NOT NULL DEFAULT 0",
   ]) {
     await db.query(col).catch(() => {});
   }
@@ -67,13 +71,15 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── PUT /api/report-settings ─────────────────────────────────────────────────
 router.put('/', verifyToken, adminOnly, async (req, res) => {
-  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale } = req.body;
-  // จำกัดช่วง zoom 50%–200% กันค่าเพี้ยน
-  const scale = Math.min(200, Math.max(50, Number(photo_scale) || 100));
+  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale, photo_overflow, photo_offset_y, name_bg_color, name_bg_opacity } = req.body;
+  // จำกัดช่วงค่ากันเพี้ยน
+  const scale   = Math.min(300, Math.max(50, Number(photo_scale) || 100));
+  const offsetY = Math.min(300, Math.max(-300, Number(photo_offset_y) || 0));
+  const nameOp  = Math.min(100, Math.max(0, Number(name_bg_opacity) || 0));
   try {
     await db.query(
-      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ? WHERE id = 1',
-      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale]
+      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ?, photo_overflow = ?, photo_offset_y = ?, name_bg_color = ?, name_bg_opacity = ? WHERE id = 1',
+      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale, photo_overflow ? 1 : 0, offsetY, name_bg_color ?? '#000000', nameOp]
     );
     res.json({ ok: true });
   } catch (err) {

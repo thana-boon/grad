@@ -14,10 +14,14 @@ function blobToImage(blob) {
 
 /**
  * Auto-crop: หากรอบจริงของตัวนักเรียนจาก pixel ที่ไม่โปร่งใส (alpha bounding box)
- * แล้วตัดพื้นที่ว่างทิ้ง + ขยายให้เต็มกรอบสัดส่วน 2:3 (เท่ากรอบ 240×360 ในรายงาน)
+ * แล้วตัดพื้นที่ว่างทิ้ง + ขยายตัวเด็กให้เต็มกรอบสัดส่วน 2:3 (เท่ากรอบ 240×360 ในรายงาน)
  * คืนค่าเป็น PNG blob ใหม่ — ถ้าหาตัวเด็กไม่เจอ (โปร่งใสทั้งรูป) จะคืน blob เดิม
+ *
+ *  - fill: ตัวคูณขยายตัวเด็กให้ใหญ่ขึ้นหลัง crop (1 = พอดีกรอบ, 1.2 = ใหญ่ขึ้น 20%)
+ *          ส่วนที่ล้นจะถูกตัด โดยยึดหัวไว้ด้านบนเสมอ (ตัดส่วนล่าง/ขา ไม่ตัดหัว)
+ *  - headroom: เว้นที่เหนือหัวเล็กน้อย (สัดส่วนของความสูงตัวเด็ก)
  */
-async function autoCropToFrame(blob, { ratio = 240 / 360, pad = 0.06, outW = 480 } = {}) {
+async function autoCropToFrame(blob, { ratio = 240 / 360, fill = 1.2, headroom = 0.05, outW = 480 } = {}) {
   let img;
   try { img = await blobToImage(blob); } catch { return blob; }
   const W = img.naturalWidth, H = img.naturalHeight;
@@ -50,18 +54,21 @@ async function autoCropToFrame(blob, { ratio = 240 / 360, pad = 0.06, outW = 480
   if (maxX < 0) return blob; // โปร่งใสทั้งรูป
 
   // แปลงพิกัดกลับเป็นความละเอียดเต็ม
-  let bx = minX / s, by = minY / s;
-  let bw = (maxX - minX + 1) / s, bh = (maxY - minY + 1) / s;
-  // เว้นขอบรอบตัว
-  const mx = bw * pad, my = bh * pad;
-  bx -= mx; by -= my; bw += mx * 2; bh += my * 2;
+  const bx = minX / s, by = minY / s;
+  const bw = (maxX - minX + 1) / s, bh = (maxY - minY + 1) / s;
 
-  // ขยายกรอบครอบให้ได้สัดส่วน 2:3 โดยยึดจุดกึ่งกลางของตัวเด็ก
+  // กรอบครอบสัดส่วน 2:3 ที่ครอบตัวเด็กพอดี (contain) — ตัวเด็กแตะขอบด้านที่ยาวกว่า
   let cw, ch;
   if (bw / bh > ratio) { cw = bw; ch = bw / ratio; }
   else { ch = bh; cw = bh * ratio; }
-  const cx = bx + bw / 2, cy = by + bh / 2;
-  const sx = cx - cw / 2, sy = cy - ch / 2;
+
+  // ขยายตัวเด็กให้ใหญ่ขึ้น = ย่อกรอบครอบลงตาม fill (ส่วนเกินจะถูกตัด)
+  cw /= fill; ch /= fill;
+
+  // จัดตำแหน่ง: กึ่งกลางแนวนอน + ยึดหัวไว้ด้านบน (เผื่อ headroom) แล้วตัดส่วนล่างแทน
+  const cx = bx + bw / 2;
+  const sx = cx - cw / 2;
+  const sy = by - bh * headroom;
 
   const outH = Math.round(outW / ratio);
   const oc = document.createElement('canvas');

@@ -18,6 +18,16 @@ function getUniLayout(count) {
   return           { cols: 2, logo: 36,  uni: 11, fac: 10, prog: 8,  pad: '5px 8px',   gap: 5  };
 }
 
+// แปลง hex (#rgb / #rrggbb) → rgba ตามค่าความทึบ (0–100)
+function hexToRgba(hex, opacityPct) {
+  let h = (hex || '#000000').replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${Math.min(100, Math.max(0, opacityPct)) / 100})`;
+}
+
 // ─── StudentCard ─────────────────────────────────────────────────────────────
 export function StudentCard({ student, settings, yearName, quoteApproved = true }) {
   const confirmedUni = student.admissions?.find(a => a.confirmed);
@@ -42,6 +52,10 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
   const textColor = settings.text_color || '#ffffff';
   const showFrame = settings.show_photo_frame === undefined ? true : !!settings.show_photo_frame;
   const photoZoom = (Number(settings.photo_scale) || 100) / 100;
+  const allowOverflow = !!settings.photo_overflow;
+  const photoOffsetY = Number(settings.photo_offset_y) || 0;
+  const nameBgOpacity = Number(settings.name_bg_opacity) || 0;
+  const nameBg = nameBgOpacity > 0 ? hexToRgba(settings.name_bg_color, nameBgOpacity) : 'transparent';
 
   const fullName = `${student.title_prefix || ''}${student.first_name || ''} ${student.last_name || ''}`;
   const nameFontSize = fullName.length <= 18 ? 38
@@ -212,9 +226,10 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             <div style={{
               width: 240, height: 360,
               borderRadius: showFrame ? 20 : 0,
-              overflow: 'hidden',
+              overflow: allowOverflow ? 'visible' : 'hidden',
               border: showFrame ? `4px solid ${textColor}dd` : 'none',
-              background: showFrame ? '#555' : 'transparent',
+              // โหมดล้นกรอบ: พื้นหลังต้องโปร่งใส ไม่งั้นจะบังรูปที่อยู่ชั้นหลัง
+              background: showFrame && !allowOverflow ? '#555' : 'transparent',
               position: 'relative', flexShrink: 0,
             }}>
               {student.photo_url
@@ -222,14 +237,21 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                     src={resolveMediaUrl(student.photo_url)}
                     crossOrigin="anonymous"
                     alt=""
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `scale(${photoZoom})`, transformOrigin: 'center top' }}
+                    // zIndex -1 ดันรูปไปอยู่หลังสุด (เหนือพื้นหลัง แต่ใต้ข้อความ/การ์ดทั้งหมด)
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`, transformOrigin: 'center top', zIndex: allowOverflow ? -1 : undefined }}
                   />
                 : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
               }
             </div>
 
             {/* Name */}
-            <div style={{ fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor }}>
+            <div style={{
+              fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
+              background: nameBg,
+              padding: nameBgOpacity > 0 ? '8px 22px' : 0,
+              borderRadius: nameBgOpacity > 0 ? 14 : 0,
+              maxWidth: '100%', boxSizing: 'border-box',
+            }}>
               {fullName}
             </div>
 
@@ -269,7 +291,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
-  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100 });
+  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0 });
   const [students, setStudents] = useState([]);
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -328,6 +350,10 @@ export default function ReportPage() {
         text_color: settings.text_color,
         show_photo_frame: settings.show_photo_frame,
         photo_scale: settings.photo_scale,
+        photo_overflow: settings.photo_overflow,
+        photo_offset_y: settings.photo_offset_y,
+        name_bg_color: settings.name_bg_color,
+        name_bg_opacity: settings.name_bg_opacity,
       });
     } finally {
       setSaving(false);
@@ -558,6 +584,7 @@ export default function ReportPage() {
                 {[
                   { key: 'show_quote', label: 'แสดงคำคม' },
                   { key: 'show_photo_frame', label: 'แสดงกรอบรูปนักเรียน' },
+                  { key: 'photo_overflow', label: 'ให้รูปล้นกรอบได้ (อยู่ชั้นหลังสุด)' },
                 ].map(({ key, label }) => {
                   const on = !!settings[key];
                   return (
@@ -601,7 +628,7 @@ export default function ReportPage() {
                 <input
                   type="range"
                   min={50}
-                  max={200}
+                  max={300}
                   step={5}
                   value={settings.photo_scale ?? 100}
                   onChange={e => setSettings(p => ({ ...p, photo_scale: Number(e.target.value) }))}
@@ -610,7 +637,35 @@ export default function ReportPage() {
                 <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
                   <span>ย่อ 50%</span>
                   <span>ปกติ 100%</span>
-                  <span>ขยาย 200%</span>
+                  <span>ขยาย 300%</span>
+                </div>
+              </div>
+
+              {/* Photo offset Y — เลื่อนรูปขึ้น/ลง */}
+              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="label-text text-xs">เลื่อนรูปขึ้น/ลง</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold tabular-nums">{settings.photo_offset_y ?? 0}px</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => setSettings(p => ({ ...p, photo_offset_y: 0 }))}
+                    >รีเซ็ต</button>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={-300}
+                  max={300}
+                  step={5}
+                  value={settings.photo_offset_y ?? 0}
+                  onChange={e => setSettings(p => ({ ...p, photo_offset_y: Number(e.target.value) }))}
+                  className="range range-primary range-xs"
+                />
+                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                  <span>ขึ้น</span>
+                  <span>กลาง</span>
+                  <span>ลง</span>
                 </div>
               </div>
             </section>
@@ -637,6 +692,43 @@ export default function ReportPage() {
                     className="btn btn-ghost btn-xs"
                     onClick={() => setSettings(p => ({ ...p, text_color: '#ffffff' }))}
                   >รีเซ็ต</button>
+                </div>
+              </div>
+
+              {/* Name background — สี + ความทึบ (ช่วยให้ชื่ออ่านง่ายเวลามีรูปอยู่ข้างหลัง) */}
+              <div className="form-control gap-2 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="label-text text-xs">พื้นหลังชื่อนักเรียน</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={settings.name_bg_color || '#000000'}
+                      onChange={e => setSettings(p => ({ ...p, name_bg_color: e.target.value }))}
+                      className="w-9 h-9 rounded cursor-pointer border border-base-300"
+                      style={{ padding: 2 }}
+                    />
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => setSettings(p => ({ ...p, name_bg_color: '#000000', name_bg_opacity: 0 }))}
+                    >รีเซ็ต</button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="label-text text-xs">ความทึบ</span>
+                  <span className="text-xs font-semibold tabular-nums">{settings.name_bg_opacity ?? 0}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={settings.name_bg_opacity ?? 0}
+                  onChange={e => setSettings(p => ({ ...p, name_bg_opacity: Number(e.target.value) }))}
+                  className="range range-primary range-xs"
+                />
+                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                  <span>โปร่งใส 0%</span>
+                  <span>ทึบ 100%</span>
                 </div>
               </div>
 

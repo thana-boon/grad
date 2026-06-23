@@ -499,6 +499,29 @@ export default function StudentPage() {
     }
   };
 
+  const deletePhoto = () => {
+    openDialog({
+      title: 'ลบรูปโปรไฟล์',
+      message: 'ต้องการลบรูปนี้ใช่หรือไม่?',
+      confirmLabel: 'ลบรูป',
+      confirmClass: 'btn-error',
+      onConfirm: async () => {
+        closeDialog();
+        setUploadingPhoto(true);
+        try {
+          await api.delete('/student/profile/photo');
+          setPhotoUrl(null);
+          login({ ...user, photo_url: null }, localStorage.getItem('token'));
+          showToast('ลบรูปแล้ว');
+        } catch {
+          showToast('ลบรูปไม่สำเร็จ', 'error');
+        } finally {
+          setUploadingPhoto(false);
+        }
+      },
+    });
+  };
+
   const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
@@ -565,6 +588,16 @@ export default function StudentPage() {
           >
             {uploadingPhoto ? <span className="loading loading-spinner loading-xs" /> : '📷'}
           </button>
+          {photoUrl && (
+            <button
+              className="absolute bottom-1 left-1 btn btn-circle btn-sm btn-error shadow"
+              onClick={deletePhoto}
+              disabled={uploadingPhoto}
+              title="ลบรูปโปรไฟล์"
+            >
+              🗑️
+            </button>
+          )}
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
         </div>
 
