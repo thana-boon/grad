@@ -41,6 +41,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
   const L = getUniLayout(grouped.length);
   const textColor = settings.text_color || '#ffffff';
   const showFrame = settings.show_photo_frame === undefined ? true : !!settings.show_photo_frame;
+  const photoZoom = (Number(settings.photo_scale) || 100) / 100;
 
   const fullName = `${student.title_prefix || ''}${student.first_name || ''} ${student.last_name || ''}`;
   const nameFontSize = fullName.length <= 18 ? 38
@@ -221,7 +222,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                     src={resolveMediaUrl(student.photo_url)}
                     crossOrigin="anonymous"
                     alt=""
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top' }}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `scale(${photoZoom})`, transformOrigin: 'center top' }}
                   />
                 : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
               }
@@ -268,7 +269,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
-  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true });
+  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100 });
   const [students, setStudents] = useState([]);
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -326,6 +327,7 @@ export default function ReportPage() {
         school_name: settings.school_name,
         text_color: settings.text_color,
         show_photo_frame: settings.show_photo_frame,
+        photo_scale: settings.photo_scale,
       });
     } finally {
       setSaving(false);
@@ -582,6 +584,34 @@ export default function ReportPage() {
                     </label>
                   );
                 })}
+              </div>
+
+              {/* Photo zoom — ปรับขนาดรูปนักเรียนทุกคนพร้อมกัน */}
+              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="label-text text-xs">ขนาดรูปนักเรียน (zoom)</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold tabular-nums">{settings.photo_scale ?? 100}%</span>
+                    <button
+                      className="btn btn-ghost btn-xs"
+                      onClick={() => setSettings(p => ({ ...p, photo_scale: 100 }))}
+                    >รีเซ็ต</button>
+                  </div>
+                </div>
+                <input
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={5}
+                  value={settings.photo_scale ?? 100}
+                  onChange={e => setSettings(p => ({ ...p, photo_scale: Number(e.target.value) }))}
+                  className="range range-primary range-xs"
+                />
+                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                  <span>ย่อ 50%</span>
+                  <span>ปกติ 100%</span>
+                  <span>ขยาย 200%</span>
+                </div>
               </div>
             </section>
 

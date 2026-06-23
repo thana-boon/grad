@@ -1,6 +1,75 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
 
+// โหลด Blob เป็น HTMLImageElement
+function blobToImage(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+/**
+ * Auto-crop: หากรอบจริงของตัวนักเรียนจาก pixel ที่ไม่โปร่งใส (alpha bounding box)
+ * แล้วตัดพื้นที่ว่างทิ้ง + ขยายให้เต็มกรอบสัดส่วน 2:3 (เท่ากรอบ 240×360 ในรายงาน)
+ * คืนค่าเป็น PNG blob ใหม่ — ถ้าหาตัวเด็กไม่เจอ (โปร่งใสทั้งรูป) จะคืน blob เดิม
+ */
+async function autoCropToFrame(blob, { ratio = 240 / 360, pad = 0.06, outW = 480 } = {}) {
+  let img;
+  try { img = await blobToImage(blob); } catch { return blob; }
+  const W = img.naturalWidth, H = img.naturalHeight;
+  if (!W || !H) return blob;
+
+  // ตรวจหา bounding box บนภาพย่อส่วน เพื่อความเร็ว
+  const DET = 400;
+  const s = Math.min(1, DET / Math.max(W, H));
+  const dw = Math.max(1, Math.round(W * s));
+  const dh = Math.max(1, Math.round(H * s));
+  const dc = document.createElement('canvas');
+  dc.width = dw; dc.height = dh;
+  const dctx = dc.getContext('2d', { willReadFrequently: true });
+  dctx.drawImage(img, 0, 0, dw, dh);
+  let data;
+  try { data = dctx.getImageData(0, 0, dw, dh).data; } catch { return blob; }
+
+  const ALPHA = 16; // ละเลย pixel จางๆ ที่หลงเหลือ
+  let minX = dw, minY = dh, maxX = -1, maxY = -1;
+  for (let y = 0; y < dh; y++) {
+    for (let x = 0; x < dw; x++) {
+      if (data[(y * dw + x) * 4 + 3] > ALPHA) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return blob; // โปร่งใสทั้งรูป
+
+  // แปลงพิกัดกลับเป็นความละเอียดเต็ม
+  let bx = minX / s, by = minY / s;
+  let bw = (maxX - minX + 1) / s, bh = (maxY - minY + 1) / s;
+  // เว้นขอบรอบตัว
+  const mx = bw * pad, my = bh * pad;
+  bx -= mx; by -= my; bw += mx * 2; bh += my * 2;
+
+  // ขยายกรอบครอบให้ได้สัดส่วน 2:3 โดยยึดจุดกึ่งกลางของตัวเด็ก
+  let cw, ch;
+  if (bw / bh > ratio) { cw = bw; ch = bw / ratio; }
+  else { ch = bh; cw = bh * ratio; }
+  const cx = bx + bw / 2, cy = by + bh / 2;
+  const sx = cx - cw / 2, sy = cy - ch / 2;
+
+  const outH = Math.round(outW / ratio);
+  const oc = document.createElement('canvas');
+  oc.width = outW; oc.height = outH;
+  oc.getContext('2d').drawImage(img, sx, sy, cw, ch, 0, 0, outW, outH);
+  return await new Promise((resolve) => oc.toBlob((b) => resolve(b || blob), 'image/png'));
+}
+
 /**
  * Modal สำหรับยืนยันรูปก่อนอัปโหลด + เลือกลบพื้นหลังได้
  *
@@ -38,8 +107,10 @@ export default function PhotoUploadDialog({ file, uploading, onCancel, onConfirm
     setProcessing(true);
     try {
       const blob = await removeBackground(file);
-      processedBlobRef.current = blob;
-      setProcessedUrl(URL.createObjectURL(blob));
+      // ตัดพื้นที่ว่าง + ขยายตัวเด็กให้เต็มกรอบ ให้ทุกรูปขนาดเท่ากัน
+      const cropped = await autoCropToFrame(blob);
+      processedBlobRef.current = cropped;
+      setProcessedUrl(URL.createObjectURL(cropped));
     } catch (err) {
       console.error('removeBackground failed', err);
       setError('ลบพื้นหลังไม่สำเร็จ ลองใหม่อีกครั้ง หรืออัปโหลดแบบเดิม');

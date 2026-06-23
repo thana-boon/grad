@@ -29,6 +29,7 @@ async function ensureTable() {
     "ALTER TABLE report_settings ADD COLUMN school_logo_url VARCHAR(500) DEFAULT NULL",
     "ALTER TABLE report_settings ADD COLUMN text_color VARCHAR(20) DEFAULT '#ffffff'",
     "ALTER TABLE report_settings ADD COLUMN show_photo_frame TINYINT(1) NOT NULL DEFAULT 1",
+    "ALTER TABLE report_settings ADD COLUMN photo_scale INT NOT NULL DEFAULT 100",
   ]) {
     await db.query(col).catch(() => {});
   }
@@ -66,11 +67,13 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── PUT /api/report-settings ─────────────────────────────────────────────────
 router.put('/', verifyToken, adminOnly, async (req, res) => {
-  const { congrats_text, show_quote, school_name, text_color, show_photo_frame } = req.body;
+  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale } = req.body;
+  // จำกัดช่วง zoom 50%–200% กันค่าเพี้ยน
+  const scale = Math.min(200, Math.max(50, Number(photo_scale) || 100));
   try {
     await db.query(
-      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ? WHERE id = 1',
-      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0]
+      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ? WHERE id = 1',
+      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale]
     );
     res.json({ ok: true });
   } catch (err) {
