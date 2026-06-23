@@ -412,6 +412,30 @@ router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req,
   });
 });
 
+// ─── DELETE /api/student/admin/students/:student_code/photo ──────────────────
+// Admin: ลบรูปนักเรียน
+router.delete('/admin/students/:student_code/photo', verifyToken, adminOnly, async (req, res) => {
+  try {
+    await ensureProfileTable();
+    const code = String(req.params.student_code || '').trim();
+    if (!code) return res.status(400).json({ message: 'ไม่พบรหัสนักเรียน' });
+
+    const [[old]] = await db.query(
+      'SELECT photo_url FROM student_profiles WHERE student_code = ?', [code]
+    );
+    if (old?.photo_url?.startsWith('/uploads/student-photos/')) {
+      const oldPath = path.join(__dirname, '..', old.photo_url.replace(/^\//, ''));
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+    await db.query(
+      'UPDATE student_profiles SET photo_url = NULL, updated_at = NOW() WHERE student_code = ?', [code]
+    );
+    res.json({ ok: true, message: 'ลบรูปแล้ว' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // ─── GET /api/student/admissions ─────────────────────────────────────────────
 // ดึงรายการสอบติดทั้งหมดของนักเรียน
 router.get('/admissions', verifyToken, studentOnly, async (req, res) => {

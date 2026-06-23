@@ -41,6 +41,8 @@ export default function AdmissionStatusPage() {
   const [actionLoading, setActionLoading] = useState(null); // id ของ admission ที่กำลัง action
   const [photoUploading, setPhotoUploading] = useState(false);
   const [pendingPhoto, setPendingPhoto] = useState(null);
+  const [pendingAutoBg, setPendingAutoBg] = useState(false); // เปิดสวิตช์ลบพื้นหลังอัตโนมัติใน dialog
+  const [photoBusy, setPhotoBusy] = useState(false);         // กำลังลบรูป / โหลดรูปมาลบพื้นหลัง
 
   const loadData = () => setReloadToken(t => t + 1);
 
@@ -168,7 +170,41 @@ export default function AdmissionStatusPage() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !selected) return;
+    setPendingAutoBg(false);
     setPendingPhoto(file);
+  };
+
+  // ลบรูปนักเรียน (ฝั่งแอดมิน)
+  const deleteAdminPhoto = async () => {
+    if (!selected?.photo_url) return;
+    if (!window.confirm('ต้องการลบรูปนักเรียนคนนี้ใช่หรือไม่?')) return;
+    setPhotoBusy(true);
+    try {
+      await api.delete(`/student/admin/students/${selected.student_code}/photo`);
+      loadData();
+    } catch (err) {
+      alert(err.response?.data?.message || err.message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  // โหลดรูปปัจจุบันมาเข้า dialog แล้วเปิดสวิตช์ลบพื้นหลังให้อัตโนมัติ
+  const removeBgFromCurrent = async () => {
+    if (!selected?.photo_url) return;
+    setPhotoBusy(true);
+    try {
+      const res = await fetch(resolveMediaUrl(selected.photo_url));
+      const blob = await res.blob();
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const file = new File([blob], `current-${Date.now()}.${ext}`, { type: blob.type || 'image/png' });
+      setPendingAutoBg(true);
+      setPendingPhoto(file);
+    } catch {
+      alert('โหลดรูปไม่สำเร็จ ลองใหม่อีกครั้ง');
+    } finally {
+      setPhotoBusy(false);
+    }
   };
 
   const uploadAdminPhotoFile = async (file) => {
@@ -183,6 +219,7 @@ export default function AdmissionStatusPage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setPendingPhoto(null);
+      setPendingAutoBg(false);
       loadData();
     } catch (err) {
       alert(err.response?.data?.message || err.message);
@@ -397,18 +434,41 @@ export default function AdmissionStatusPage() {
                   className="hidden"
                   onChange={handleAdminUploadPhoto}
                 />
-                <button
-                  className={`btn btn-sm btn-outline ${photoUploading ? 'loading' : ''}`}
-                  onClick={() => photoInputRef.current?.click()}
-                  disabled={photoUploading}
-                >
-                  {!photoUploading && '🖼️'} ใส่รูป
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    className={`btn btn-sm btn-outline ${photoUploading ? 'loading' : ''}`}
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={photoUploading || photoBusy}
+                  >
+                    {!photoUploading && '🖼️'} ใส่รูป
+                  </button>
+                  {selected.photo_url && (
+                    <>
+                      <button
+                        className="btn btn-sm btn-outline"
+                        onClick={removeBgFromCurrent}
+                        disabled={photoUploading || photoBusy}
+                        title="ลบพื้นหลังของรูปที่อัปโหลดแล้ว"
+                      >
+                        {photoBusy ? <span className="loading loading-spinner loading-xs" /> : '✂️'} ลบพื้นหลัง
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline btn-error"
+                        onClick={deleteAdminPhoto}
+                        disabled={photoUploading || photoBusy}
+                        title="ลบรูปนักเรียน"
+                      >
+                        🗑️ ลบรูป
+                      </button>
+                    </>
+                  )}
+                </div>
                 <PhotoUploadDialog
                   key={pendingPhoto?.name + pendingPhoto?.lastModified}
                   file={pendingPhoto}
                   uploading={photoUploading}
-                  onCancel={() => setPendingPhoto(null)}
+                  autoRemoveBg={pendingAutoBg}
+                  onCancel={() => { setPendingPhoto(null); setPendingAutoBg(false); }}
                   onConfirm={uploadAdminPhotoFile}
                 />
               </div>

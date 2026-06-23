@@ -83,10 +83,11 @@ async function autoCropToFrame(blob, { ratio = 240 / 360, fill = 1.2, headroom =
  * Props:
  *  - file: File | null        ไฟล์ที่ผู้ใช้เลือก (เปิด modal เมื่อไม่ null)
  *  - uploading: boolean       กำลังอัปโหลดอยู่ไหม (จากฝั่ง caller)
+ *  - autoRemoveBg: boolean    ถ้า true จะเปิดสวิตช์ลบพื้นหลังให้อัตโนมัติเมื่อเปิด modal
  *  - onCancel: () => void
  *  - onConfirm: (finalFile: File) => void   ส่งไฟล์สุดท้ายกลับไปให้ caller อัปโหลด
  */
-export default function PhotoUploadDialog({ file, uploading, onCancel, onConfirm }) {
+export default function PhotoUploadDialog({ file, uploading, autoRemoveBg = false, onCancel, onConfirm }) {
   const [removeBg, setRemoveBg] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');
@@ -103,6 +104,12 @@ export default function PhotoUploadDialog({ file, uploading, onCancel, onConfirm
   useEffect(() => {
     return () => { if (processedUrl) URL.revokeObjectURL(processedUrl); };
   }, [processedUrl]);
+
+  // แอดมินสั่งลบพื้นหลังให้รูปที่นักเรียนอัปมาแล้ว → เปิดสวิตช์อัตโนมัติตอน mount
+  useEffect(() => {
+    if (autoRemoveBg && file) handleToggle(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRemoveBg, file]);
 
   const handleToggle = async (checked) => {
     setError('');
