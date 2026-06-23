@@ -16,6 +16,18 @@ const FILTER_BTN = {
   confirmed: 'btn-success',
 };
 
+// พื้นหลังตารางหมากรุก — ช่วยให้เห็นว่ารูปที่ "ตัดพื้นหลังแล้ว" (PNG โปร่งใส) มองทะลุได้
+const CHECKER_STYLE = {
+  backgroundImage:
+    'linear-gradient(45deg,#d4d4d4 25%,transparent 25%),linear-gradient(-45deg,#d4d4d4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#d4d4d4 75%),linear-gradient(-45deg,transparent 75%,#d4d4d4 75%)',
+  backgroundSize: '10px 10px',
+  backgroundPosition: '0 0,0 5px,5px -5px,-5px 0',
+  backgroundColor: '#fff',
+};
+
+// รูปที่ตัดพื้นหลังแล้วจะถูกบันทึกเป็น .png โปร่งใส (ดู PhotoUploadDialog)
+const isBgRemoved = (url) => /\.png(\?|$)/i.test(url || '');
+
 export default function AdmissionStatusPage() {
   const [yearId, setYearId] = useState('');
   const [students, setStudents] = useState([]);
@@ -342,6 +354,19 @@ export default function AdmissionStatusPage() {
         )}
       </div>
 
+      {/* ── คำอธิบายสัญลักษณ์รูป ── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-base-content/60">
+        <span className="font-semibold text-base-content/50">รูปนักเรียน:</span>
+        <span className="flex items-center gap-1"><span className="text-base">👤</span> ยังไม่ใส่รูป</span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-4 rounded-sm ring-1 ring-base-300 bg-base-300" /> ใส่รูปแล้ว (ยังไม่ตัดพื้นหลัง)
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 h-4 rounded-sm ring-1 ring-base-300" style={CHECKER_STYLE} />
+          <span className="text-success">✂️</span> ตัดพื้นหลังแล้ว (โปร่งใส)
+        </span>
+      </div>
+
       {/* ── ตาราง ── */}
       {loading ? (
         <div className="flex justify-center py-10">
@@ -356,6 +381,7 @@ export default function AdmissionStatusPage() {
               <tr className="text-xs">
                 <th>#</th>
                 <th>รหัส</th>
+                <th>รูป</th>
                 <th>ชื่อ-นามสกุล</th>
                 <th>ชั้น</th>
                 <th>ห้อง</th>
@@ -376,6 +402,35 @@ export default function AdmissionStatusPage() {
                   >
                     <td className="text-base-content/40">{i + 1}</td>
                     <td className="font-mono">{s.student_code}</td>
+                    <td>
+                      <div
+                        className="relative w-9 h-12 rounded overflow-hidden ring-1 ring-base-300 flex items-center justify-center"
+                        style={s.photo_url ? CHECKER_STYLE : undefined}
+                        title={
+                          !s.photo_url ? 'ยังไม่ใส่รูป'
+                            : isBgRemoved(s.photo_url) ? 'ใส่รูปแล้ว · ตัดพื้นหลังแล้ว'
+                            : 'ใส่รูปแล้ว · ยังไม่ตัดพื้นหลัง'
+                        }
+                      >
+                        {s.photo_url ? (
+                          <>
+                            <img
+                              src={resolveMediaUrl(s.photo_url)}
+                              alt=""
+                              loading="lazy"
+                              className="w-full h-full object-cover"
+                            />
+                            {isBgRemoved(s.photo_url) && (
+                              <span className="absolute bottom-0 right-0 bg-success text-success-content text-[9px] leading-none px-0.5 py-px rounded-tl">
+                                ✂️
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-base-content/30 text-lg">👤</span>
+                        )}
+                      </div>
+                    </td>
                     <td>{s.title_prefix}{s.first_name} {s.last_name}</td>
                     <td>{s.class_level}</td>
                     <td>{s.class_room}</td>
