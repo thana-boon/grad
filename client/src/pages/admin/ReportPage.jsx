@@ -18,6 +18,25 @@ function getUniLayout(count) {
   return           { cols: 2, logo: 36,  uni: 11, fac: 10, prog: 8,  pad: '5px 8px',   gap: 5  };
 }
 
+// ─── การตั้งค่าที่แยกรายคนได้ (รูปนักเรียนแต่ละคนมาไม่เหมือนกัน) ────────────────
+export const PER_STUDENT_KEYS = ['photo_scale', 'photo_offset_y', 'photo_overflow', 'info_offset_y'];
+
+// รหัสนักเรียนบางที่ pad 0 นำหน้า บางที่ไม่ pad — normalize ให้ตรงกับฝั่ง server
+export const normCode = (c) => {
+  const n = parseInt(c, 10);
+  return Number.isNaN(n) ? String(c ?? '') : String(n);
+};
+
+// รวมค่ากลาง + ค่าเฉพาะคน (null/undefined ใน override = ใช้ค่ากลาง)
+export function mergeStudentSettings(settings, override) {
+  if (!override) return settings;
+  const out = { ...settings };
+  for (const k of PER_STUDENT_KEYS) {
+    if (override[k] !== null && override[k] !== undefined) out[k] = override[k];
+  }
+  return out;
+}
+
 // แปลง hex (#rgb / #rrggbb) → rgba ตามค่าความทึบ (0–100)
 function hexToRgba(hex, opacityPct) {
   let h = (hex || '#000000').replace('#', '');
@@ -307,6 +326,10 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
   const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0, info_offset_y: 0, confirm_color: '#22c55e', confirm_opacity: 22 });
+  // ค่าเฉพาะรายคน: { [normCode]: { photo_scale, photo_offset_y, photo_overflow, info_offset_y } }
+  const [overrides, setOverrides] = useState({});
+  const [dirtyCodes, setDirtyCodes] = useState(new Set());
+  const [perStudent, setPerStudent] = useState(false);
   const [students, setStudents] = useState([]);
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
@@ -328,8 +351,10 @@ export default function ReportPage() {
       api.get('/report-settings'),
       api.get('/academic-years'),
       api.get('/academic-years/active').then(r => r.data || null).catch(() => null),
-    ]).then(([sRes, yRes, activeRes]) => {
+      api.get('/report-settings/students').then(r => r.data || {}).catch(() => ({})),
+    ]).then(([sRes, yRes, activeRes, ovRes]) => {
       setSettings(sRes.data || { congrats_text: '', show_quote: true, background_image_url: null });
+      setOverrides(ovRes);
       const years = yRes.data || [];
       if (activeRes?.active_year_id) {
         const active = years.find(y => String(y.id) === String(activeRes.active_year_id)) || activeRes.year;
@@ -373,6 +398,12 @@ export default function ReportPage() {
         confirm_color: settings.confirm_color,
         confirm_opacity: settings.confirm_opacity,
       });
+      await Promise.all(
+        [...dirtyCodes].map(code =>
+          api.put(`/report-settings/students/${code}`, overrides[code] || {})
+        )
+      );
+      setDirtyCodes(new Set());
     } finally {
       setSaving(false);
     }
@@ -465,7 +496,7 @@ export default function ReportPage() {
       document.body.appendChild(container);
 
       const root = createRoot(container);
-      root.render(<StudentCard student={student} settings={settings} yearName={yearName} quoteApproved={approvedQuotes.has(student.student_code)} />);
+      root.render(<StudentCard student={student} settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])} yearName={yearName} quoteApproved={approvedQuotes.has(student.student_code)} />);
 
       // Wait for render + fonts
       await document.fonts.ready;
@@ -502,12 +533,58 @@ export default function ReportPage() {
   const exportPdf = () => {
     if (students.length === 0) return;
     // Store data in localStorage for print page
-    localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, yearName }));
+    localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, overrides, yearName }));
     window.open(`${import.meta.env.BASE_URL}admin/report/print`, '_blank');
   };
 
   const previewStudent = students[previewIndex];
   const SCALE = 0.35; // preview scale
+
+  // ── ค่าเฉพาะรายคน ──
+  const previewCode = previewStudent ? normCode(previewStudent.student_code) : null;
+  const activeOverride = previewCode ? overrides[previewCode] : null;
+  // แก้ค่าเฉพาะคนได้ต่อเมื่อเปิดโหมด และมีนักเรียนที่กำลังพรีวิวอยู่
+  const editingStudent = perStudent && !!previewCode;
+  const hasOverride = !!activeOverride && PER_STUDENT_KEYS.some(k => activeOverride[k] !== null && activeOverride[k] !== undefined);
+
+  // อ่านค่า: โหมดรายคนใช้ค่า override ถ้ามี ไม่มีก็ตกไปใช้ค่ากลาง
+  const pv = (key) => {
+    if (editingStudent && activeOverride && activeOverride[key] !== null && activeOverride[key] !== undefined) {
+      return activeOverride[key];
+    }
+    return settings[key];
+  };
+  const isOverridden = (key) =>
+    editingStudent && !!activeOverride && activeOverride[key] !== null && activeOverride[key] !== undefined;
+
+  // เขียนค่า: null = กลับไปใช้ค่ากลาง
+  const setPv = (key, value) => {
+    if (editingStudent) {
+      setOverrides(prev => ({ ...prev, [previewCode]: { ...(prev[previewCode] || {}), [key]: value } }));
+      setDirtyCodes(prev => new Set(prev).add(previewCode));
+    } else {
+      setSettings(p => ({ ...p, [key]: value }));
+    }
+  };
+  const resetPv = (key, def) => setPv(key, editingStudent ? null : def);
+
+  // ล้าง override ทั้งหมดของคนนี้
+  const clearOverride = async () => {
+    if (!previewCode) return;
+    await api.delete(`/report-settings/students/${previewCode}`);
+    setOverrides(prev => {
+      const next = { ...prev };
+      delete next[previewCode];
+      return next;
+    });
+    setDirtyCodes(prev => {
+      const next = new Set(prev);
+      next.delete(previewCode);
+      return next;
+    });
+  };
+
+  const previewSettings = mergeStudentSettings(settings, activeOverride);
 
   return (
     <div className="p-4 flex flex-col gap-4 min-h-screen">
@@ -602,7 +679,6 @@ export default function ReportPage() {
                 {[
                   { key: 'show_quote', label: 'แสดงคำคม' },
                   { key: 'show_photo_frame', label: 'แสดงกรอบรูปนักเรียน' },
-                  { key: 'photo_overflow', label: 'ให้รูปล้นกรอบได้ (อยู่ชั้นหลังสุด)' },
                 ].map(({ key, label }) => {
                   const on = !!settings[key];
                   return (
@@ -631,87 +707,143 @@ export default function ReportPage() {
                 })}
               </div>
 
-              {/* Photo zoom — ปรับขนาดรูปนักเรียนทุกคนพร้อมกัน */}
-              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="label-text text-xs">ขนาดรูปนักเรียน (zoom)</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold tabular-nums">{settings.photo_scale ?? 100}%</span>
+              {/* ── กลุ่มค่าที่แยกรายคนได้ ── */}
+              <div className={`flex flex-col gap-3 rounded-lg border p-3 transition-colors ${
+                editingStudent ? 'border-secondary/60 bg-secondary/5' : 'border-base-300'
+              }`}>
+                {/* Mode switch: ค่ากลาง ↔ เฉพาะคนที่พรีวิวอยู่ */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="join w-full">
                     <button
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => setSettings(p => ({ ...p, photo_scale: 100 }))}
-                    >รีเซ็ต</button>
+                      className={`btn btn-xs join-item flex-1 ${!perStudent ? 'btn-primary' : 'btn-outline'}`}
+                      onClick={() => setPerStudent(false)}
+                    >ทุกคน</button>
+                    <button
+                      className={`btn btn-xs join-item flex-1 ${perStudent ? 'btn-secondary' : 'btn-outline'}`}
+                      onClick={() => setPerStudent(true)}
+                      disabled={!previewCode}
+                    >เฉพาะคนนี้</button>
                   </div>
+                  <p className="text-[10px] leading-relaxed text-base-content/50">
+                    {editingStudent ? (
+                      <>ปรับให้ <span className="font-semibold text-base-content/80">{previewStudent.first_name} {previewStudent.last_name}</span> คนเดียว — คนอื่นยังใช้ค่ากลาง</>
+                    ) : perStudent
+                      ? 'เลือกนักเรียนในช่องพรีวิวก่อน จึงจะปรับเฉพาะคนได้'
+                      : 'ค่าเหล่านี้ใช้กับนักเรียนทุกคน ยกเว้นคนที่ตั้งค่าเฉพาะไว้'}
+                  </p>
+                  {editingStudent && hasOverride && (
+                    <button className="btn btn-ghost btn-xs text-error self-start" onClick={clearOverride}>
+                      ↺ ล้างค่าเฉพาะคนนี้ (กลับไปใช้ค่ากลาง)
+                    </button>
+                  )}
                 </div>
-                <input
-                  type="range"
-                  min={50}
-                  max={300}
-                  step={5}
-                  value={settings.photo_scale ?? 100}
-                  onChange={e => setSettings(p => ({ ...p, photo_scale: Number(e.target.value) }))}
-                  className="range range-primary range-xs"
-                />
-                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
-                  <span>ย่อ 50%</span>
-                  <span>ปกติ 100%</span>
-                  <span>ขยาย 300%</span>
-                </div>
-              </div>
 
-              {/* Photo offset Y — เลื่อนรูปขึ้น/ลง */}
-              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="label-text text-xs">เลื่อนรูปขึ้น/ลง</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold tabular-nums">{settings.photo_offset_y ?? 0}px</span>
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => setSettings(p => ({ ...p, photo_offset_y: 0 }))}
-                    >รีเซ็ต</button>
-                  </div>
-                </div>
-                <input
-                  type="range"
-                  min={-300}
-                  max={300}
-                  step={5}
-                  value={settings.photo_offset_y ?? 0}
-                  onChange={e => setSettings(p => ({ ...p, photo_offset_y: Number(e.target.value) }))}
-                  className="range range-primary range-xs"
-                />
-                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
-                  <span>ขึ้น</span>
-                  <span>กลาง</span>
-                  <span>ลง</span>
-                </div>
-              </div>
+                {/* Photo overflow */}
+                {(() => {
+                  const on = !!pv('photo_overflow');
+                  return (
+                    <label className={`flex items-center justify-between gap-3 cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${
+                      on ? 'border-primary/60 bg-primary/10' : 'border-base-300 bg-base-200/40 hover:border-base-content/20'
+                    }`}>
+                      <span className="flex items-center gap-2 text-sm">
+                        <span className={`text-xs font-bold w-9 text-center rounded px-1 py-0.5 ${on ? 'bg-primary text-primary-content' : 'bg-base-300 text-base-content/50'}`}>
+                          {on ? 'เปิด' : 'ปิด'}
+                        </span>
+                        <span className={on ? 'font-semibold' : 'text-base-content/70'}>ให้รูปล้นกรอบได้ (อยู่ชั้นหลังสุด)</span>
+                        {isOverridden('photo_overflow') && <span className="badge badge-secondary badge-xs">เฉพาะคน</span>}
+                      </span>
+                      <input
+                        type="checkbox"
+                        className="toggle toggle-primary toggle-sm"
+                        checked={on}
+                        onChange={e => setPv('photo_overflow', e.target.checked)}
+                      />
+                    </label>
+                  );
+                })()}
 
-              {/* Info offset Y — เลื่อนชื่อ + กล่องมหาลัยที่ยืนยัน ขึ้น/ลงพร้อมกัน */}
-              <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="label-text text-xs">เลื่อนชื่อ + มหาลัยที่ยืนยัน ขึ้น/ลง</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold tabular-nums">{settings.info_offset_y ?? 0}px</span>
-                    <button
-                      className="btn btn-ghost btn-xs"
-                      onClick={() => setSettings(p => ({ ...p, info_offset_y: 0 }))}
-                    >รีเซ็ต</button>
+                {/* Photo zoom */}
+                <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="label-text text-xs flex items-center gap-1.5">
+                      ขนาดรูปนักเรียน (zoom)
+                      {isOverridden('photo_scale') && <span className="badge badge-secondary badge-xs">เฉพาะคน</span>}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold tabular-nums">{pv('photo_scale') ?? 100}%</span>
+                      <button className="btn btn-ghost btn-xs" onClick={() => resetPv('photo_scale', 100)}>รีเซ็ต</button>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={50}
+                    max={300}
+                    step={5}
+                    value={pv('photo_scale') ?? 100}
+                    onChange={e => setPv('photo_scale', Number(e.target.value))}
+                    className="range range-primary range-xs"
+                  />
+                  <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                    <span>ย่อ 50%</span>
+                    <span>ปกติ 100%</span>
+                    <span>ขยาย 300%</span>
                   </div>
                 </div>
-                <input
-                  type="range"
-                  min={-300}
-                  max={300}
-                  step={5}
-                  value={settings.info_offset_y ?? 0}
-                  onChange={e => setSettings(p => ({ ...p, info_offset_y: Number(e.target.value) }))}
-                  className="range range-primary range-xs"
-                />
-                <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
-                  <span>ขึ้น</span>
-                  <span>กลาง</span>
-                  <span>ลง</span>
+
+                {/* Photo offset Y — เลื่อนรูปขึ้น/ลง */}
+                <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="label-text text-xs flex items-center gap-1.5">
+                      เลื่อนรูปขึ้น/ลง
+                      {isOverridden('photo_offset_y') && <span className="badge badge-secondary badge-xs">เฉพาะคน</span>}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold tabular-nums">{pv('photo_offset_y') ?? 0}px</span>
+                      <button className="btn btn-ghost btn-xs" onClick={() => resetPv('photo_offset_y', 0)}>รีเซ็ต</button>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={-300}
+                    max={300}
+                    step={5}
+                    value={pv('photo_offset_y') ?? 0}
+                    onChange={e => setPv('photo_offset_y', Number(e.target.value))}
+                    className="range range-primary range-xs"
+                  />
+                  <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                    <span>ขึ้น</span>
+                    <span>กลาง</span>
+                    <span>ลง</span>
+                  </div>
+                </div>
+
+                {/* Info offset Y — เลื่อนชื่อ + กล่องมหาลัยที่ยืนยัน ขึ้น/ลงพร้อมกัน */}
+                <div className="form-control gap-1 rounded-lg border border-base-300 bg-base-200/40 px-3 py-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="label-text text-xs flex items-center gap-1.5">
+                      เลื่อนชื่อ + มหาลัยที่ยืนยัน ขึ้น/ลง
+                      {isOverridden('info_offset_y') && <span className="badge badge-secondary badge-xs">เฉพาะคน</span>}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold tabular-nums">{pv('info_offset_y') ?? 0}px</span>
+                      <button className="btn btn-ghost btn-xs" onClick={() => resetPv('info_offset_y', 0)}>รีเซ็ต</button>
+                    </div>
+                  </div>
+                  <input
+                    type="range"
+                    min={-300}
+                    max={300}
+                    step={5}
+                    value={pv('info_offset_y') ?? 0}
+                    onChange={e => setPv('info_offset_y', Number(e.target.value))}
+                    className="range range-primary range-xs"
+                  />
+                  <div className="flex justify-between text-[10px] text-base-content/40 px-0.5">
+                    <span>ขึ้น</span>
+                    <span>กลาง</span>
+                    <span>ลง</span>
+                  </div>
                 </div>
               </div>
             </section>
@@ -853,7 +985,9 @@ export default function ReportPage() {
               onClick={saveSettings}
               disabled={saving}
             >
-              {saving ? <span className="loading loading-spinner loading-xs" /> : '💾 บันทึกการตั้งค่า'}
+              {saving
+                ? <span className="loading loading-spinner loading-xs" />
+                : `💾 บันทึกการตั้งค่า${dirtyCodes.size > 0 ? ` (+ เฉพาะคน ${dirtyCodes.size} คน)` : ''}`}
             </button>
           </div>
         </div>
@@ -869,10 +1003,14 @@ export default function ReportPage() {
                   value={previewIndex}
                   onChange={setPreviewIndex}
                   placeholder="เลือกนักเรียน..."
-                  options={students.map((s, i) => ({
-                    value: i,
-                    label: `${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
-                  }))}
+                  options={students.map((s, i) => {
+                    const ov = overrides[normCode(s.student_code)];
+                    const tuned = ov && PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined);
+                    return {
+                      value: i,
+                      label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
+                    };
+                  })}
                 />
               )}
             </div>
@@ -893,7 +1031,7 @@ export default function ReportPage() {
                   flexShrink: 0,
                 }}>
                   <div style={{ transform: `scale(${SCALE})`, transformOrigin: 'top left', width: 1080, height: 1080 }}>
-                    <StudentCard student={previewStudent} settings={settings} yearName={yearName} quoteApproved={approvedQuotes.has(previewStudent.student_code)} />
+                    <StudentCard student={previewStudent} settings={previewSettings} yearName={yearName} quoteApproved={approvedQuotes.has(previewStudent.student_code)} />
                   </div>
                 </div>
               </div>

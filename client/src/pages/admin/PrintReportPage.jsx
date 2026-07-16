@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StudentCard } from './ReportPage';
+import { StudentCard, mergeStudentSettings, normCode } from './ReportPage';
 
 // หน้านี้เปิดใน tab ใหม่เพื่อ print เป็น PDF
 // รับข้อมูลจาก localStorage ที่ ReportPage เก็บไว้
@@ -35,7 +35,7 @@ export default function PrintReportPage() {
     );
   }
 
-  const { students, settings, yearName } = data;
+  const { students, settings, overrides = {}, yearName } = data;
   const SCALE = 0.714; // 1080 * 0.714 ≈ 771px ≈ A4 width at 96dpi
 
   return (
@@ -102,7 +102,7 @@ export default function PrintReportPage() {
       {students.map(student => (
         <div key={student.student_code} className="print-page-wrapper">
           <div className="print-scale-container">
-            <StudentCard student={student} settings={settings} yearName={yearName} />
+            <StudentCard student={student} settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])} yearName={yearName} />
           </div>
         </div>
       ))}
