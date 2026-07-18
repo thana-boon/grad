@@ -261,13 +261,28 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
               position: 'relative', flexShrink: 0,
             }}>
               {student.photo_url
-                ? <img
-                    src={resolveMediaUrl(student.photo_url)}
-                    crossOrigin="anonymous"
-                    alt=""
-                    // zIndex -1 ดันรูปไปอยู่หลังสุด (เหนือพื้นหลัง แต่ใต้ข้อความ/การ์ดทั้งหมด)
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`, transformOrigin: 'center top', zIndex: allowOverflow ? -1 : undefined }}
-                  />
+                ? allowOverflow
+                  // โหมดล้นกรอบ: ต้องใช้ <img> เพราะรูปต้องโผล่พ้นกรอบได้ (background ล้นกล่องไม่ได้)
+                  ? <img
+                      src={resolveMediaUrl(student.photo_url)}
+                      crossOrigin="anonymous"
+                      alt=""
+                      // zIndex -1 ดันรูปไปอยู่หลังสุด (เหนือพื้นหลัง แต่ใต้ข้อความ/การ์ดทั้งหมด)
+                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`, transformOrigin: 'center top', zIndex: -1 }}
+                    />
+                  // โหมดปกติ: ใช้ background-image (backgroundSize:cover) — html2canvas เรนเดอร์สัดส่วนถูก
+                  // ต่างจาก object-fit ของ <img> ที่ html2canvas 1.4.1 ตีความเป็น fill ทำให้รูปยืด/หัวแบน
+                  : <div
+                      style={{
+                        position: 'absolute', inset: 0,
+                        backgroundImage: `url(${resolveMediaUrl(student.photo_url)})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center top',
+                        backgroundRepeat: 'no-repeat',
+                        transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`,
+                        transformOrigin: 'center top',
+                      }}
+                    />
                 : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
               }
             </div>
@@ -481,7 +496,7 @@ export default function ReportPage() {
     setSettings(prev => ({ ...prev, school_logo_url: null }));
   };
 
-  // ── Export ZIP (images) ──
+  // ── Export helpers ──
   // Preload all image URLs before html2canvas
   const preloadImages = async (urls) => {
     await Promise.all(
@@ -497,73 +512,164 @@ export default function ReportPage() {
     );
   };
 
+  // เรนเดอร์การ์ดนักเรียน 1 ใบ → <canvas> (ใช้ร่วมกันทั้ง ZIP และ PDF)
+  // scale = ความละเอียด (2 = คมขึ้น 2 เท่า, ช่วยให้ตราไม่มัว)
+  const renderCardCanvas = async (student, scale = 2) => {
+    // preload รูปเฉพาะคนนี้ก่อน (ทีละคน กัน server โดนยิงรูปพร้อมกันทีเดียว)
+    await preloadImages([
+      resolveMediaUrl(student.photo_url),
+      ...(student.admissions || []).map(a => resolveMediaUrl(a.logo_url)),
+    ]);
+
+    // วางที่มุมซ้ายบนให้ html2canvas เห็น — ถูก overlay ตอน export ทับไว้ (z 99999)
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;top:0;left:0;width:1080px;height:1080px;overflow:hidden;pointer-events:none;z-index:1000;';
+    document.body.appendChild(container);
+
+    const root = createRoot(container);
+    root.render(
+      <StudentCard
+        student={student}
+        settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])}
+        yearName={yearName}
+        quoteApproved={approvedQuotes.has(student.student_code)}
+      />
+    );
+
+    // รอ paint จริง (แทน delay ตายตัว 1 วินาที/คน) — รูปกับฟอนต์ถูกโหลดไว้ก่อนแล้ว
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await new Promise(r => setTimeout(r, 50));
+
+    try {
+      // จับภาพ container ตามขนาดจริง (1080×1080) ตรงๆ — ไม่ส่ง width/height/window
+      // เพื่อเลี่ยง logic crop ของ html2canvas ที่ทำให้สัดส่วนเพี้ยน (ภาพยืด/หัวแบน)
+      return await html2canvas(container, {
+        useCORS: true, allowTaint: false,
+        scale, logging: false,
+        imageTimeout: 15000,
+        backgroundColor: '#0f0c29',
+      });
+    } finally {
+      root.unmount();
+      document.body.removeChild(container);
+    }
+  };
+
+  // วางภาพลง PDF แบบคงสัดส่วน (letterbox-fit) — ป้องกันภาพยืดถ้าขนาดหน้ากับ canvas ไม่ตรงกัน
+  const addFittedImage = (doc, imgData, fmt, cw, ch) => {
+    const pw = doc.internal.pageSize.getWidth();
+    const ph = doc.internal.pageSize.getHeight();
+    const fit = Math.min(pw / cw, ph / ch);
+    const w = cw * fit;
+    const h = ch * fit;
+    doc.addImage(imgData, fmt, (pw - w) / 2, (ph - h) / 2, w, h);
+  };
+
+  // ── Export คนเดียว (คนที่กำลังพรีวิว) — ไว้เทสเร็ว ไม่ต้องรอทั้งชั้น ──
+  const exportOne = async () => {
+    if (!previewStudent) return;
+    setExporting(true);
+    setExportProgress(0);
+    try {
+      await preloadImages([
+        resolveMediaUrl(settings.background_image_url),
+        resolveMediaUrl(settings.school_logo_url),
+      ]);
+      await document.fonts.ready;
+      const canvas = await renderCardCanvas(previewStudent);
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+      if (blob) saveAs(blob, `${previewStudent.student_code}_${previewStudent.first_name}_${previewStudent.last_name}.png`);
+      setExportProgress(100);
+    } catch (err) {
+      console.error('Export คนเดียวไม่สำเร็จ', err);
+      showToast('ดาวน์โหลดรูปคนนี้ไม่สำเร็จ', 'error');
+    } finally {
+      setExporting(false);
+      setExportProgress(0);
+    }
+  };
+
   const exportZip = async () => {
     if (students.length === 0) return;
     setExporting(true);
     setExportProgress(0);
-    const zip = new JSZip();
-
-    // Preload shared assets
-    await preloadImages([
-      resolveMediaUrl(settings.background_image_url),
-      resolveMediaUrl(settings.school_logo_url),
-    ]);
-
-    for (let i = 0; i < students.length; i++) {
-      const student = students[i];
-
-      // Preload per-student images
+    try {
+      const zip = new JSZip();
       await preloadImages([
-        resolveMediaUrl(student.photo_url),
-        ...( student.admissions || []).map(a => resolveMediaUrl(a.logo_url)),
+        resolveMediaUrl(settings.background_image_url),
+        resolveMediaUrl(settings.school_logo_url),
       ]);
-
-      // Place at top-left so html2canvas can see it; covered by full-screen overlay (rendered below)
-      const container = document.createElement('div');
-      container.style.cssText = 'position:fixed;top:0;left:0;width:1080px;height:1080px;overflow:hidden;pointer-events:none;z-index:1000;';
-      document.body.appendChild(container);
-
-      const root = createRoot(container);
-      root.render(<StudentCard student={student} settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])} yearName={yearName} quoteApproved={approvedQuotes.has(student.student_code)} />);
-
-      // Wait for render + fonts
       await document.fonts.ready;
-      await new Promise(r => setTimeout(r, 1000));
 
-      try {
-        const canvas = await html2canvas(container, {
-          width: 1080, height: 1080,
-          useCORS: true, allowTaint: false,
-          scale: 1, logging: false,
-          imageTimeout: 10000,
-          backgroundColor: '#0f0c29',
-        });
-        const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-        if (blob) {
-          zip.file(`${student.student_code}_${student.first_name}_${student.last_name}.png`, blob);
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
+        try {
+          const canvas = await renderCardCanvas(student);
+          const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+          if (blob) zip.file(`${student.student_code}_${student.first_name}_${student.last_name}.png`, blob);
+        } catch (err) {
+          console.error('Capture failed:', student.student_code, err);
         }
-      } catch (err) {
-        console.error('Capture failed:', student.student_code, err);
+        setExportProgress(Math.round(((i + 1) / students.length) * 100));
       }
 
-      root.unmount();
-      document.body.removeChild(container);
-      setExportProgress(Math.round(((i + 1) / students.length) * 100));
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, `gradtrack-report-${yearName}.zip`);
+    } catch (err) {
+      console.error('Export ZIP failed', err);
+      showToast('สร้าง ZIP ไม่สำเร็จ', 'error');
+    } finally {
+      setExporting(false);
+      setExportProgress(0);
     }
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    saveAs(content, `gradtrack-report-${yearName}.zip`);
-    setExporting(false);
-    setExportProgress(0);
   };
 
   // ── Export PDF ──
-  const exportPdf = () => {
+  // สร้าง PDF ตรงๆ ฝั่ง client (html2canvas → jsPDF) ทีละใบ — ไม่พึ่ง print dialog ของ browser
+  // ที่ค้างเมื่อมีนักเรียนหลักร้อยคน
+  const exportPdf = async () => {
     if (students.length === 0) return;
-    // Store data in localStorage for print page
-    // approvedCodes: ส่งรายชื่อที่อนุมัติคำคมไปด้วย เพื่อให้ PDF ตรงกับตัวอย่าง (Set แปลงเป็น array)
-    localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, overrides, yearName, approvedCodes: [...approvedQuotes] }));
-    window.open(`${import.meta.env.BASE_URL}admin/report/print`, '_blank');
+    setExporting(true);
+    setExportProgress(0);
+    try {
+      await preloadImages([
+        resolveMediaUrl(settings.background_image_url),
+        resolveMediaUrl(settings.school_logo_url),
+      ]);
+      await document.fonts.ready;
+
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'px', format: [1080, 1080], compress: true });
+
+      let added = 0;
+      for (let i = 0; i < students.length; i++) {
+        const student = students[i];
+        try {
+          const canvas = await renderCardCanvas(student);
+          // JPEG 0.92 เพื่อลดขนาดไฟล์ (หลายร้อยหน้าเป็น PNG จะใหญ่มาก)
+          const img = canvas.toDataURL('image/jpeg', 0.92);
+          if (added > 0) doc.addPage([1080, 1080], 'portrait');
+          // วางแบบคงสัดส่วน (fit) — กันภาพยืด/หัวแบน ไม่ว่าขนาดหน้าจะเป็นเท่าไร
+          addFittedImage(doc, img, 'JPEG', canvas.width, canvas.height);
+          added++;
+        } catch (err) {
+          console.error('Capture failed:', student.student_code, err);
+        }
+        setExportProgress(Math.round(((i + 1) / students.length) * 100));
+      }
+
+      if (added === 0) {
+        showToast('ไม่สามารถสร้างหน้า PDF ได้', 'error');
+        return;
+      }
+      doc.save(`gradtrack-report-${yearName}.pdf`);
+    } catch (err) {
+      console.error('Export PDF failed', err);
+      showToast('สร้าง PDF ไม่สำเร็จ', 'error');
+    } finally {
+      setExporting(false);
+      setExportProgress(0);
+    }
   };
 
   const previewStudent = students[previewIndex];
@@ -1033,23 +1139,40 @@ export default function ReportPage() {
         {/* ── Preview Panel ── */}
         <div className="flex flex-col gap-3">
           <div className="card bg-base-100 shadow border border-base-300 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-base">👁️ ตัวอย่างรายงาน</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h2 className="font-semibold text-base shrink-0">👁️ ตัวอย่างรายงาน</h2>
               {students.length > 0 && (
-                <SearchableSelect
-                  className="w-64"
-                  value={previewIndex}
-                  onChange={setPreviewIndex}
-                  placeholder="เลือกนักเรียน..."
-                  options={students.map((s, i) => {
-                    const ov = overrides[normCode(s.student_code)];
-                    const tuned = ov && PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined);
-                    return {
-                      value: i,
-                      label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
-                    };
-                  })}
-                />
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <button
+                    className="btn btn-outline btn-sm btn-square shrink-0"
+                    onClick={() => setPreviewIndex(i => Math.max(0, i - 1))}
+                    disabled={previewIndex <= 0}
+                    title="คนก่อนหน้า"
+                  >‹</button>
+                  <SearchableSelect
+                    className="w-40 sm:w-56 min-w-0"
+                    value={previewIndex}
+                    onChange={setPreviewIndex}
+                    placeholder="เลือกนักเรียน..."
+                    options={students.map((s, i) => {
+                      const ov = overrides[normCode(s.student_code)];
+                      const tuned = ov && PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined);
+                      return {
+                        value: i,
+                        label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
+                      };
+                    })}
+                  />
+                  <button
+                    className="btn btn-outline btn-sm btn-square shrink-0"
+                    onClick={() => setPreviewIndex(i => Math.min(students.length - 1, i + 1))}
+                    disabled={previewIndex >= students.length - 1}
+                    title="คนถัดไป"
+                  >›</button>
+                  <span className="text-xs text-base-content/50 tabular-nums whitespace-nowrap shrink-0">
+                    {previewIndex + 1}/{students.length}
+                  </span>
+                </div>
               )}
             </div>
 
@@ -1099,6 +1222,14 @@ export default function ReportPage() {
               )}
 
               <div className="flex gap-2 w-full sm:w-auto">
+                <button
+                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={exportOne}
+                  disabled={exporting || !previewStudent}
+                  title="ดาวน์โหลดเฉพาะคนที่พรีวิวอยู่ (PNG) — ไว้เทสเร็ว"
+                >
+                  ⬇️ โหลดคนนี้
+                </button>
                 <button
                   className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"
                   onClick={exportZip}
