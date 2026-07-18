@@ -18,6 +18,41 @@ function getUniLayout(count) {
   return           { cols: 2, logo: 36,  uni: 11, fac: 10, prog: 8,  pad: '5px 8px',   gap: 5  };
 }
 
+// ─── Free-layout: ตำแหน่ง/ขนาดของแต่ละชิ้นบน canvas 1080×1080 (ลากวาง+ปรับขนาดได้เหมือน Word) ─
+// แต่ละชิ้นเก็บ { x, y, w, scale }  (รูปใช้ w แล้วสูง = w×1.5)
+export const LAYOUT_ELEMENTS = ['logo', 'school', 'congrats', 'photo', 'name'];
+export const LAYOUT_LABELS = {
+  logo: '🏫 โลโก้โรงเรียน', school: '🏫 ชื่อโรงเรียน', congrats: '📝 ข้อความยินดี',
+  photo: '👤 รูปนักเรียน', name: '🏷️ ชื่อนักเรียน',
+};
+// ค่าเริ่มต้น — วางให้ใกล้เคียงเลย์เอาต์เดิม (โลโก้มุมบนซ้าย, ข้อความบนกลาง, รูป+ชื่อฝั่งขวา)
+export const DEFAULT_LAYOUT = {
+  logo:     { x: 28,  y: 24,  w: 96,  scale: 1 },
+  school:   { x: 140, y: 30,  w: 800, scale: 1 },
+  congrats: { x: 110, y: 86,  w: 860, scale: 1 },
+  photo:    { x: 700, y: 355, w: 240, scale: 1 },
+  name:     { x: 610, y: 735, w: 430, scale: 1 },
+};
+export const PHOTO_ASPECT = 1.5; // สูง = กว้าง × 1.5 (คงสัดส่วน 240×360 เดิม)
+// กล่องรายชื่อมหาวิทยาลัยฝั่งซ้าย — คงระบบ auto-layout เดิม (ไม่ลากอิสระ)
+export const UNI_BOX = { x: 56, y: 250, w: 560, h: 620 };
+
+// layout_json จาก DB เป็น string → object (พังก็คืน {} = ใช้ default)
+export function parseLayoutJson(v) {
+  if (!v) return {};
+  if (typeof v === 'object') return v;
+  try { const o = JSON.parse(v); return o && typeof o === 'object' ? o : {}; } catch { return {}; }
+}
+
+// รวม DEFAULT ← ค่ากลาง ← ค่าเฉพาะคน (ทีละชิ้น)
+export function mergeLayout(central, override) {
+  const out = {};
+  for (const k of LAYOUT_ELEMENTS) {
+    out[k] = { ...DEFAULT_LAYOUT[k], ...(central?.[k] || {}), ...(override?.[k] || {}) };
+  }
+  return out;
+}
+
 // ─── การตั้งค่าที่แยกรายคนได้ (รูปนักเรียนแต่ละคนมาไม่เหมือนกัน) ────────────────
 export const PER_STUDENT_KEYS = ['photo_scale', 'photo_offset_y', 'photo_overflow', 'info_offset_y'];
 
@@ -29,8 +64,9 @@ export const normCode = (c) => {
 
 // รวมค่ากลาง + ค่าเฉพาะคน (null/undefined ใน override = ใช้ค่ากลาง)
 export function mergeStudentSettings(settings, override) {
-  if (!override) return settings;
-  const out = { ...settings };
+  // layout รวมเสมอ (DEFAULT ← กลาง ← เฉพาะคน) เพื่อให้ StudentCard ได้พิกัดครบทุกชิ้น
+  const out = { ...settings, layout: mergeLayout(settings.layout, override?.layout) };
+  if (!override) return out;
   for (const k of PER_STUDENT_KEYS) {
     if (override[k] !== null && override[k] !== undefined) out[k] = override[k];
   }
@@ -90,6 +126,11 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
     : fullName.length <= 48 ? 16
     : 14;
 
+  // ── พิกัด/ขนาดแต่ละชิ้น (เติม default ให้ครบเสมอ) ──
+  const LO = mergeLayout(settings.layout, null);
+  const photoW = LO.photo.w;
+  const photoH = photoW * PHOTO_ASPECT;
+
   return (
     <div style={{
       width: 1080,
@@ -98,6 +139,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
       overflow: 'hidden',
       fontFamily: "'Prompt', 'Noto Sans Thai', sans-serif",
       background: '#0f0c29',
+      color: textColor,
       boxSizing: 'border-box',
     }}>
       {/* Background image — background-image (cover) แทน object-fit กัน html2canvas ยืดภาพ */}
@@ -114,78 +156,142 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
         />
       )}
 
-      {/* School Logo — absolute top-left corner */}
+      {/* School Logo — ลากวาง/ปรับขนาดได้ */}
       {/* ใช้ background-image (contain) แทน <img object-fit> — html2canvas 1.4.1 ตี object-fit เป็น fill ทำให้ตรายืด */}
       {settings.school_logo_url && (
         <div
           style={{
-            position: 'absolute', top: 24, left: 28,
-            width: 96, height: 96,
+            position: 'absolute', left: LO.logo.x, top: LO.logo.y,
+            width: LO.logo.w, height: LO.logo.w,
             backgroundImage: `url(${resolveMediaUrl(settings.school_logo_url)})`,
             backgroundSize: 'contain',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat',
-            zIndex: 2,
+            zIndex: 4,
           }}
         />
       )}
 
-      {/* Content column */}
-      <div style={{
-        position: 'absolute', inset: 0, zIndex: 1,
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '28px 56px 28px',
-        boxSizing: 'border-box',
-        color: textColor,
-        overflowY: 'hidden',
-      }}>
-        {/* School Name */}
-        {settings.school_name && (
-          <div style={{
-            fontSize: 30, fontWeight: 700, textAlign: 'center',
-            opacity: 0.97, marginBottom: 6, flexShrink: 0, lineHeight: 1.35,
-          }}>
-            {settings.school_name}
-          </div>
-        )}
+      {/* School Name — ลากวาง/ปรับขนาดได้ */}
+      {settings.school_name && (
+        <div style={{
+          position: 'absolute', left: LO.school.x, top: LO.school.y, width: LO.school.w,
+          fontSize: 30 * LO.school.scale, fontWeight: 700, textAlign: 'center',
+          opacity: 0.97, lineHeight: 1.35, zIndex: 3,
+        }}>
+          {settings.school_name}
+        </div>
+      )}
 
-        {/* Congrats text */}
-        {settings.congrats_text && (
-          <div style={{
-            fontSize: 22, textAlign: 'center', opacity: 0.9,
-            marginBottom: 12, lineHeight: 1.55, flexShrink: 0, maxWidth: 860,
-          }}>
+      {/* Congrats text + divider — ลากวาง/ปรับขนาดได้ (ย้ายพร้อมกัน) */}
+      {settings.congrats_text && (
+        <div style={{
+          position: 'absolute', left: LO.congrats.x, top: LO.congrats.y, width: LO.congrats.w,
+          textAlign: 'center', zIndex: 3,
+        }}>
+          <div style={{ fontSize: 22 * LO.congrats.scale, opacity: 0.9, lineHeight: 1.55 }}>
             {settings.congrats_text}
           </div>
+          <div style={{ width: '50%', height: 1, background: `${textColor}4d`, margin: '12px auto 0' }} />
+        </div>
+      )}
+
+      {/* Photo — ลากวาง/ปรับขนาดได้ */}
+      <div style={{
+        position: 'absolute', left: LO.photo.x, top: LO.photo.y,
+        width: photoW, height: photoH,
+        borderRadius: showFrame ? 20 : 0,
+        overflow: allowOverflow ? 'visible' : 'hidden',
+        clipPath: allowOverflow ? undefined : `inset(0 round ${showFrame ? 20 : 0}px)`,
+        border: showFrame ? `4px solid ${textColor}dd` : 'none',
+        background: showFrame && !allowOverflow ? '#555' : 'transparent',
+        boxSizing: 'border-box',
+        zIndex: 1,
+      }}>
+        {student.photo_url
+          ? allowOverflow
+            ? <img
+                src={resolveMediaUrl(student.photo_url)}
+                crossOrigin="anonymous"
+                alt=""
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`, transformOrigin: 'center top', zIndex: -1 }}
+              />
+            : <div
+                style={{
+                  position: 'absolute', inset: 0,
+                  backgroundImage: `url(${resolveMediaUrl(student.photo_url)})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center top',
+                  backgroundRepeat: 'no-repeat',
+                  transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`,
+                  transformOrigin: 'center top',
+                }}
+              />
+          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
+        }
+      </div>
+
+      {/* Name + Quote + กล่องยืนยัน — ลากวาง/ปรับขนาดได้ (info_offset_y = nudge ละเอียดเพิ่ม) */}
+      <div style={{
+        position: 'absolute', left: LO.name.x, top: LO.name.y + infoOffsetY, width: LO.name.w,
+        textAlign: 'center', zIndex: 3,
+        transform: `scale(${LO.name.scale})`, transformOrigin: 'top center',
+      }}>
+        {/* Name */}
+        <div style={{
+          display: 'inline-block',
+          fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
+          background: nameBg,
+          padding: nameBgOpacity > 0 ? '8px 22px' : 0,
+          borderRadius: nameBgOpacity > 0 ? 14 : 0,
+          maxWidth: '100%', boxSizing: 'border-box',
+          whiteSpace: 'nowrap',
+        }}>
+          {fullName}
+        </div>
+
+        {/* Quote */}
+        {!!settings.show_quote && !!student.quote && quoteApproved && (
+          <div style={{
+            fontSize: 18, fontStyle: 'italic', textAlign: 'center',
+            opacity: 0.75, lineHeight: 1.6, maxWidth: 360, margin: '14px auto 0',
+          }}>
+            "{student.quote}"
+          </div>
         )}
 
-        {/* Divider */}
-        <div style={{
-          width: '50%', height: 1,
-          background: `${textColor}4d`,
-          marginBottom: 16, flexShrink: 0,
-        }} />
-
-        {/* ── Body: two-column ── */}
-        <div style={{
-          flex: 1, width: '100%',
-          display: 'flex', flexDirection: 'row',
-          gap: 28, minHeight: 0, alignItems: 'stretch',
-        }}>
-
-          {/* LEFT: Universities — vertically centered */}
+        {/* Confirmed badge */}
+        {confirmedUni && (
           <div style={{
-            flex: '0 0 56%',
-            display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            minHeight: 0, overflow: 'hidden', gap: 0,
+            background: confirmBg,
+            border: `2px solid ${confirmBorder}`,
+            borderRadius: 14, padding: '12px 16px',
+            textAlign: 'center', width: '100%', boxSizing: 'border-box', marginTop: 14,
           }}>
+            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
+            <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
+              {confirmedUni.university_name}
+            </div>
+            <div style={{ fontSize: 13, opacity: 0.8, marginTop: 3 }}>
+              {confirmedUni.faculty_name}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Universities — กล่องฝั่งซ้าย คงระบบ auto-layout เดิม (ไม่ลากอิสระ) */}
+      <div style={{
+        position: 'absolute', left: UNI_BOX.x, top: UNI_BOX.y, width: UNI_BOX.w, height: UNI_BOX.h,
+        display: 'flex', flexDirection: 'column', justifyContent: 'center',
+        minHeight: 0, overflow: 'hidden', zIndex: 2,
+      }}>
             {grouped.length > 0 && (
               <>
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: `repeat(${L.cols}, 1fr)`,
                   gap: L.gap,
-                  alignContent: 'end',
+                  alignContent: 'center',
                 }}>
                   {grouped.map(g => {
                     const isOne      = grouped.length === 1;
@@ -244,118 +350,116 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                 </div>
               </>
             )}
-          </div>
-
-          {/* RIGHT: Photo + Name + Quote — centered vertically */}
-          <div style={{
-            flex: 1,
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center',
-          }}>
-            {/* จัดกึ่งกลางแนวตั้งด้วย margin:auto + ใช้ block layout ข้างใน (ไม่ใช่ flex column)
-                — html2canvas เรนเดอร์ block margin ตรงเป๊ะ ต่างจาก flex แนวตั้งที่แทรกช่องว่างเกิน ทำให้ชื่อหล่นห่างจากรูป */}
-            <div style={{
-              width: '100%',
-              margin: 'auto 0',
-            }}>
-            {/* Photo */}
-            <div style={{
-              margin: '0 auto',
-              width: 240, height: 360,
-              borderRadius: showFrame ? 20 : 0,
-              overflow: allowOverflow ? 'visible' : 'hidden',
-              // clip-path บังคับตัดรูปตามกรอบแม้ตอน print/PDF — overflow:hidden ตัด child ที่มี transform ไม่อยู่บน Chrome print
-              clipPath: allowOverflow ? undefined : `inset(0 round ${showFrame ? 20 : 0}px)`,
-              border: showFrame ? `4px solid ${textColor}dd` : 'none',
-              // โหมดล้นกรอบ: พื้นหลังต้องโปร่งใส ไม่งั้นจะบังรูปที่อยู่ชั้นหลัง
-              background: showFrame && !allowOverflow ? '#555' : 'transparent',
-              position: 'relative', flexShrink: 0,
-            }}>
-              {student.photo_url
-                ? allowOverflow
-                  // โหมดล้นกรอบ: ต้องใช้ <img> เพราะรูปต้องโผล่พ้นกรอบได้ (background ล้นกล่องไม่ได้)
-                  ? <img
-                      src={resolveMediaUrl(student.photo_url)}
-                      crossOrigin="anonymous"
-                      alt=""
-                      // zIndex -1 ดันรูปไปอยู่หลังสุด (เหนือพื้นหลัง แต่ใต้ข้อความ/การ์ดทั้งหมด)
-                      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center top', transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`, transformOrigin: 'center top', zIndex: -1 }}
-                    />
-                  // โหมดปกติ: ใช้ background-image (backgroundSize:cover) — html2canvas เรนเดอร์สัดส่วนถูก
-                  // ต่างจาก object-fit ของ <img> ที่ html2canvas 1.4.1 ตีความเป็น fill ทำให้รูปยืด/หัวแบน
-                  : <div
-                      style={{
-                        position: 'absolute', inset: 0,
-                        backgroundImage: `url(${resolveMediaUrl(student.photo_url)})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center top',
-                        backgroundRepeat: 'no-repeat',
-                        transform: `translateY(${photoOffsetY}px) scale(${photoZoom})`,
-                        transformOrigin: 'center top',
-                      }}
-                    />
-                : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
-              }
-            </div>
-
-            {/* Name + Quote + กล่องยืนยัน — เลื่อนขึ้น/ลงพร้อมกัน
-                block layout + margin ล้วน (ไม่มี flex) — html2canvas เรนเดอร์แนวตั้งตรงที่สุด */}
-            <div style={{
-              width: '100%', boxSizing: 'border-box', textAlign: 'center',
-              marginTop: 14 + infoOffsetY,
-            }}>
-              {/* Name */}
-              <div style={{
-                display: 'inline-block',
-                fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
-                background: nameBg,
-                padding: nameBgOpacity > 0 ? '8px 22px' : 0,
-                borderRadius: nameBgOpacity > 0 ? 14 : 0,
-                maxWidth: '100%', boxSizing: 'border-box',
-                whiteSpace: 'nowrap',
-              }}>
-                {fullName}
-              </div>
-
-              {/* Quote */}
-              {!!settings.show_quote && !!student.quote && quoteApproved && (
-                <div style={{
-                  fontSize: 18, fontStyle: 'italic', textAlign: 'center',
-                  opacity: 0.75, lineHeight: 1.6, maxWidth: 360, margin: '14px auto 0',
-                }}>
-                  "{student.quote}"
-                </div>
-              )}
-
-              {/* Confirmed badge */}
-              {confirmedUni && (
-                <div style={{
-                  background: confirmBg,
-                  border: `2px solid ${confirmBorder}`,
-                  borderRadius: 14, padding: '12px 16px',
-                  textAlign: 'center', width: '100%', boxSizing: 'border-box', marginTop: 14,
-                }}>
-                  <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
-                  <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
-                    {confirmedUni.university_name}
-                  </div>
-                  <div style={{ fontSize: 13, opacity: 0.8, marginTop: 3 }}>
-                    {confirmedUni.faculty_name}
-                  </div>
-                </div>
-              )}
-            </div>
-            </div>
-          </div>
-        </div>
       </div>
+    </div>
+  );
+}
+
+// ─── DragResizeBox: กล่องลากวาง+ปรับขนาด 1 ชิ้น (วางทับ preview) ───────────────
+// พิกัดที่รับ/ส่งเป็น canvas px (1080 ฐาน) — คูณ scale เฉพาะตอนวาด/หารตอนคำนวณ delta
+const round2 = (v) => Math.round(v * 100) / 100;
+function DragResizeBox({ x, y, w, h, scale, curScale, label, selected, overridden, resizeMode, onSelect, onChange, onReset }) {
+  const drag = useRef(null);
+
+  const onPointerMove = (e) => {
+    if (!drag.current) return;
+    const dx = (e.clientX - drag.current.sx) / scale;
+    const dy = (e.clientY - drag.current.sy) / scale;
+    if (drag.current.type === 'move') {
+      onChange({ x: Math.round(drag.current.ox + dx), y: Math.round(drag.current.oy + dy) });
+    } else {
+      const newW = Math.max(24, Math.round(drag.current.ow + dx));
+      const patch = { w: newW };
+      // text = ขยายกล่อง+ฟอนต์พร้อมกัน (เหมือนลากมุมกล่องข้อความใน Word)
+      if (resizeMode === 'text') patch.scale = round2(drag.current.os * (newW / drag.current.ow));
+      onChange(patch);
+    }
+  };
+  const endDrag = (e) => {
+    drag.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const startMove = (e) => {
+    e.stopPropagation();
+    onSelect();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { type: 'move', sx: e.clientX, sy: e.clientY, ox: x, oy: y };
+  };
+  const startResize = (e) => {
+    e.stopPropagation();
+    onSelect();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { type: 'resize', sx: e.clientX, sy: e.clientY, ow: w, os: curScale };
+  };
+
+  const handleSize = 14;
+  return (
+    <div
+      onPointerDown={startMove}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      style={{
+        position: 'absolute',
+        left: x * scale, top: y * scale,
+        width: Math.max(w, 24) * scale, height: Math.max(h, 24) * scale,
+        boxSizing: 'border-box',
+        border: selected ? '2px solid #3b82f6' : '1.5px dashed rgba(59,130,246,0.55)',
+        background: selected ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.03)',
+        borderRadius: 4,
+        cursor: 'move',
+        touchAction: 'none',
+        zIndex: selected ? 20 : 10,
+      }}
+    >
+      {/* ป้ายชื่อชิ้น */}
+      <div style={{
+        position: 'absolute', top: -20, left: -2,
+        fontSize: 10, lineHeight: '16px', whiteSpace: 'nowrap',
+        padding: '0 6px', borderRadius: 4,
+        background: selected ? '#3b82f6' : 'rgba(59,130,246,0.75)', color: '#fff',
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        {label}{overridden && <span style={{ fontSize: 9 }}>🎨</span>}
+      </div>
+
+      {selected && onReset && (
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onReset(); }}
+          title="รีเซ็ตตำแหน่ง/ขนาดชิ้นนี้"
+          style={{
+            position: 'absolute', top: -20, right: -2,
+            fontSize: 10, lineHeight: '16px', padding: '0 6px', borderRadius: 4,
+            background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer',
+          }}
+        >↺</button>
+      )}
+
+      {/* จุดปรับขนาด มุมล่างขวา */}
+      <div
+        onPointerDown={startResize}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        style={{
+          position: 'absolute', right: -handleSize / 2, bottom: -handleSize / 2,
+          width: handleSize, height: handleSize,
+          background: '#fff', border: '2px solid #3b82f6', borderRadius: 3,
+          cursor: 'nwse-resize', touchAction: 'none',
+          display: selected ? 'block' : 'none',
+        }}
+      />
     </div>
   );
 }
 
 // ─── ReportPage ───────────────────────────────────────────────────────────────
 export default function ReportPage() {
-  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0, info_offset_y: 0, confirm_color: '#22c55e', confirm_opacity: 22 });
+  const [settings, setSettings] = useState({ congrats_text: '', show_quote: true, background_image_url: null, school_name: '', school_logo_url: null, text_color: '#ffffff', show_photo_frame: true, photo_scale: 100, photo_overflow: false, photo_offset_y: 0, name_bg_color: '#000000', name_bg_opacity: 0, info_offset_y: 0, confirm_color: '#22c55e', confirm_opacity: 22, layout: {} });
+  const [editLayout, setEditLayout] = useState(false);   // เปิด modal จัดวางอิสระ
+  const [selectedEl, setSelectedEl] = useState(null);    // ชิ้นที่เลือกอยู่ในโหมดลากวาง
+  const [modalScale, setModalScale] = useState(0.55);    // สเกล preview ใน modal (คำนวณให้พอดีจอ)
   // ค่าเฉพาะรายคน: { [normCode]: { photo_scale, photo_offset_y, photo_overflow, info_offset_y } }
   const [overrides, setOverrides] = useState({});
   const [dirtyCodes, setDirtyCodes] = useState(new Set());
@@ -394,8 +498,14 @@ export default function ReportPage() {
         return {};
       }),
     ]).then(([sRes, yRes, activeRes, ovRes]) => {
-      setSettings(sRes.data || { congrats_text: '', show_quote: true, background_image_url: null });
-      setOverrides(ovRes);
+      const s = sRes.data || { congrats_text: '', show_quote: true, background_image_url: null };
+      setSettings({ ...s, layout: parseLayoutJson(s.layout_json) });
+      // แปลง layout_json ของแต่ละคน string → object
+      const ov = {};
+      for (const [code, row] of Object.entries(ovRes || {})) {
+        ov[code] = { ...row, layout: parseLayoutJson(row.layout_json) };
+      }
+      setOverrides(ov);
       const years = yRes.data || [];
       if (activeRes?.active_year_id) {
         const active = years.find(y => String(y.id) === String(activeRes.active_year_id)) || activeRes.year;
@@ -439,12 +549,19 @@ export default function ReportPage() {
         info_offset_y: settings.info_offset_y,
         confirm_color: settings.confirm_color,
         confirm_opacity: settings.confirm_opacity,
+        layout_json: JSON.stringify(settings.layout || {}),
       });
       // เซฟค่าเฉพาะรายคน — เก็บผลรายตัวเพื่อรู้ว่ามีอันไหน fail
       const results = await Promise.allSettled(
-        codes.map(code =>
-          api.put(`/report-settings/students/${code}`, overrides[code] || {})
-        )
+        codes.map(code => {
+          const ov = overrides[code] || {};
+          // แยก layout object → layout_json string (ไม่ส่ง field layout ดิบ)
+          const { layout, ...rest } = ov;
+          return api.put(`/report-settings/students/${code}`, {
+            ...rest,
+            layout_json: layout && Object.keys(layout).length > 0 ? JSON.stringify(layout) : null,
+          });
+        })
       );
       const failed = results.filter(r => r.status === 'rejected');
       if (failed.length > 0) {
@@ -803,14 +920,15 @@ export default function ReportPage() {
   };
 
   const previewStudent = students[previewIndex];
-  const SCALE = 0.35; // preview scale
+  const SCALE = 0.35; // preview scale (ในหน้า) — โหมดจัดวางเปิด modal ใหญ่แยกต่างหาก
 
   // ── ค่าเฉพาะรายคน ──
   const previewCode = previewStudent ? normCode(previewStudent.student_code) : null;
   const activeOverride = previewCode ? overrides[previewCode] : null;
   // แก้ค่าเฉพาะคนได้ต่อเมื่อเปิดโหมด และมีนักเรียนที่กำลังพรีวิวอยู่
   const editingStudent = perStudent && !!previewCode;
-  const hasOverride = !!activeOverride && PER_STUDENT_KEYS.some(k => activeOverride[k] !== null && activeOverride[k] !== undefined);
+  const hasLayoutOverride = !!activeOverride?.layout && Object.keys(activeOverride.layout).length > 0;
+  const hasOverride = (!!activeOverride && PER_STUDENT_KEYS.some(k => activeOverride[k] !== null && activeOverride[k] !== undefined)) || hasLayoutOverride;
 
   // อ่านค่า: โหมดรายคนใช้ค่า override ถ้ามี ไม่มีก็ตกไปใช้ค่ากลาง
   const pv = (key) => {
@@ -833,6 +951,43 @@ export default function ReportPage() {
   };
   const resetPv = (key, def) => setPv(key, editingStudent ? null : def);
 
+  // ── Free-layout: เขียน/รีเซ็ตตำแหน่ง+ขนาดของแต่ละชิ้น ──
+  // patch = { x?, y?, w?, scale? } — merge ทับค่าที่แสดงอยู่ (ไม่ให้กระโดดตอนเริ่ม override)
+  const setLayout = (elKey, patch) => {
+    if (editingStudent) {
+      setOverrides(prev => {
+        const cur = prev[previewCode] || {};
+        const curLayout = cur.layout || {};
+        const base = { ...DEFAULT_LAYOUT[elKey], ...(settings.layout?.[elKey] || {}), ...(curLayout[elKey] || {}) };
+        return { ...prev, [previewCode]: { ...cur, layout: { ...curLayout, [elKey]: { ...base, ...patch } } } };
+      });
+      setDirtyCodes(prev => new Set(prev).add(previewCode));
+    } else {
+      setSettings(p => {
+        const base = { ...DEFAULT_LAYOUT[elKey], ...(p.layout?.[elKey] || {}) };
+        return { ...p, layout: { ...(p.layout || {}), [elKey]: { ...base, ...patch } } };
+      });
+    }
+  };
+  // รีเซ็ตชิ้นเดียว: โหมดรายคน = ลบ override ชิ้นนั้น (กลับไปใช้ค่ากลาง), โหมดกลาง = กลับ default
+  const resetLayoutEl = (elKey) => {
+    if (editingStudent) {
+      setOverrides(prev => {
+        const cur = prev[previewCode];
+        if (!cur?.layout) return prev;
+        const nl = { ...cur.layout }; delete nl[elKey];
+        return { ...prev, [previewCode]: { ...cur, layout: nl } };
+      });
+      setDirtyCodes(prev => new Set(prev).add(previewCode));
+    } else {
+      setSettings(p => {
+        const nl = { ...(p.layout || {}) }; delete nl[elKey];
+        return { ...p, layout: nl };
+      });
+    }
+  };
+  const isLayoutOverridden = (elKey) => editingStudent && !!activeOverride?.layout?.[elKey];
+
   // ล้าง override ทั้งหมดของคนนี้
   const clearOverride = async () => {
     if (!previewCode) return;
@@ -850,6 +1005,59 @@ export default function ReportPage() {
   };
 
   const previewSettings = mergeStudentSettings(settings, activeOverride);
+
+  // ── Free-layout overlay: นิยามชิ้น + ความสูงประมาณ (สำหรับ hit-area) ──
+  const layoutBoxDefs = [
+    settings.school_logo_url && { key: 'logo', mode: 'w' },
+    settings.school_name && { key: 'school', mode: 'text' },
+    settings.congrats_text && { key: 'congrats', mode: 'text' },
+    { key: 'photo', mode: 'wh' },
+    { key: 'name', mode: 'text' },
+  ].filter(Boolean);
+  const elBoxHeight = (key, b) => {
+    if (key === 'logo') return b.w;
+    if (key === 'photo') return b.w * PHOTO_ASPECT;
+    if (key === 'school') return 44 * (b.scale || 1);
+    if (key === 'congrats') return 92 * (b.scale || 1);
+    return 150 * (b.scale || 1); // name
+  };
+  // overlay กล่องลากวาง วางทับ card ที่สเกลใด ๆ (ใช้ทั้งใน modal)
+  const renderDragOverlay = (scale) => (
+    <div onPointerDown={() => setSelectedEl(null)} style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+      {layoutBoxDefs.map(({ key, mode }) => {
+        const b = previewSettings.layout[key];
+        return (
+          <DragResizeBox
+            key={key}
+            x={b.x} y={b.y} w={b.w} h={elBoxHeight(key, b)}
+            curScale={b.scale || 1}
+            scale={scale}
+            label={LAYOUT_LABELS[key]}
+            resizeMode={mode}
+            selected={selectedEl === key}
+            overridden={isLayoutOverridden(key)}
+            onSelect={() => setSelectedEl(key)}
+            onChange={(patch) => setLayout(key, patch)}
+            onReset={() => resetLayoutEl(key)}
+          />
+        );
+      })}
+    </div>
+  );
+
+  // คำนวณสเกล modal ให้พอดีจอเมื่อเปิด (ตามความกว้าง/สูงหน้าต่าง)
+  useEffect(() => {
+    if (!editLayout) return;
+    const calc = () => {
+      const s = Math.min((window.innerWidth - 140) / 1080, (window.innerHeight - 260) / 1080);
+      setModalScale(Math.max(0.32, Math.min(0.74, s)));
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { setEditLayout(false); setSelectedEl(null); } };
+    calc();
+    window.addEventListener('resize', calc);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('resize', calc); window.removeEventListener('keydown', onKey); };
+  }, [editLayout]);
 
   return (
     <div className="p-4 flex flex-col gap-4 min-h-screen">
@@ -875,6 +1083,95 @@ export default function ReportPage() {
           <span className="loading loading-spinner loading-lg" />
           <p style={{ fontSize: 20 }}>กำลัง export... {exportProgress}%</p>
           <progress className="progress progress-primary w-64" value={exportProgress} max={100} />
+        </div>
+      )}
+
+      {/* ── Modal จัดวางอิสระ (ลากย้าย/ปรับขนาดชิ้นบนการ์ด) ── */}
+      {editLayout && previewStudent && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 90000, background: 'rgba(0,0,0,0.65)', display: 'flex', flexDirection: 'column' }}>
+          {/* Header */}
+          <div className="bg-base-100 border-b border-base-300 px-4 py-2.5 flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-sm shrink-0">✋ จัดวางอิสระ</span>
+            <div className="join shrink-0">
+              <button
+                className={`btn btn-xs join-item ${!perStudent ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => setPerStudent(false)}
+              >ทุกคน</button>
+              <button
+                className={`btn btn-xs join-item ${perStudent ? 'btn-secondary' : 'btn-outline'}`}
+                onClick={() => setPerStudent(true)}
+                disabled={!previewCode}
+              >เฉพาะคนนี้</button>
+            </div>
+            {editingStudent && <span className="badge badge-secondary badge-xs shrink-0">🎨 {previewStudent.first_name}</span>}
+            <div className="flex items-center gap-1.5 ml-auto min-w-0">
+              <button
+                className="btn btn-outline btn-xs btn-square shrink-0"
+                onClick={() => setPreviewIndex(i => Math.max(0, i - 1))}
+                disabled={previewIndex <= 0}
+                title="คนก่อนหน้า"
+              >‹</button>
+              <SearchableSelect
+                className="w-40 sm:w-56 min-w-0"
+                value={previewIndex}
+                onChange={setPreviewIndex}
+                placeholder="เลือกนักเรียน..."
+                options={students.map((s, i) => {
+                  const ov = overrides[normCode(s.student_code)];
+                  const tuned = ov && (PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined) || (ov.layout && Object.keys(ov.layout).length > 0));
+                  return {
+                    value: i,
+                    label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
+                  };
+                })}
+              />
+              <button
+                className="btn btn-outline btn-xs btn-square shrink-0"
+                onClick={() => setPreviewIndex(i => Math.min(students.length - 1, i + 1))}
+                disabled={previewIndex >= students.length - 1}
+                title="คนถัดไป"
+              >›</button>
+              <span className="text-xs text-base-content/50 tabular-nums whitespace-nowrap shrink-0">
+                {previewIndex + 1}/{students.length}
+              </span>
+            </div>
+          </div>
+
+          {/* Body — การ์ดใหญ่ + overlay ลากวาง */}
+          <div className="flex-1 overflow-auto flex items-center justify-center p-10">
+            <div style={{ position: 'relative', width: 1080 * modalScale, height: 1080 * modalScale, flexShrink: 0 }}>
+              <div style={{
+                width: 1080 * modalScale, height: 1080 * modalScale,
+                overflow: 'hidden', borderRadius: 12, boxShadow: '0 12px 48px rgba(0,0,0,0.5)',
+              }}>
+                <div style={{ transform: `scale(${modalScale})`, transformOrigin: 'top left', width: 1080, height: 1080 }}>
+                  <StudentCard student={previewStudent} settings={previewSettings} yearName={yearName} quoteApproved={approvedQuotes.has(previewStudent.student_code)} />
+                </div>
+              </div>
+              {renderDragOverlay(modalScale)}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="bg-base-100 border-t border-base-300 px-4 py-2.5 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-base-content/60 min-w-0">
+              ✋ ลากกลาง = ย้าย • ลากมุมขวาล่าง = ปรับขนาด • คลิกที่ว่าง = ยกเลิกเลือก • ↺ บนกล่อง = รีเซ็ตชิ้นนั้น
+            </span>
+            <div className="flex items-center gap-2 ml-auto shrink-0">
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={saveSettings}
+                disabled={saving}
+                title="บันทึกตำแหน่ง/ขนาดทั้งหมด"
+              >
+                {saving ? <span className="loading loading-spinner loading-xs" /> : `💾 บันทึก${dirtyCodes.size > 0 ? ` (+เฉพาะคน ${dirtyCodes.size})` : ''}`}
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => { setEditLayout(false); setSelectedEl(null); }}
+              >เสร็จ</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1270,7 +1567,17 @@ export default function ReportPage() {
         <div className="flex flex-col gap-3">
           <div className="card bg-base-100 shadow border border-base-300 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <h2 className="font-semibold text-base shrink-0">👁️ ตัวอย่างรายงาน</h2>
+              <div className="flex items-center gap-2 shrink-0">
+                <h2 className="font-semibold text-base">👁️ ตัวอย่างรายงาน</h2>
+                <button
+                  className="btn btn-xs btn-primary gap-1"
+                  onClick={() => { setEditLayout(true); setSelectedEl(null); }}
+                  disabled={!previewStudent}
+                  title="เปิดหน้าต่างใหญ่สำหรับลากย้าย/ปรับขนาด โลโก้ ข้อความ รูป ชื่อ ได้อิสระ"
+                >
+                  ✋ ลากวางอิสระ
+                </button>
+              </div>
               {students.length > 0 && (
                 <div className="flex items-center gap-1.5 min-w-0">
                   <button

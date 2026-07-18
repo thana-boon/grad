@@ -37,6 +37,8 @@ async function ensureTable() {
     "ALTER TABLE report_settings ADD COLUMN info_offset_y INT NOT NULL DEFAULT 0",
     "ALTER TABLE report_settings ADD COLUMN confirm_color VARCHAR(20) DEFAULT '#22c55e'",
     "ALTER TABLE report_settings ADD COLUMN confirm_opacity INT NOT NULL DEFAULT 22",
+    // layout_json = พิกัด/ขนาดของแต่ละชิ้น (โลโก้/ชื่อ ร.ร./ข้อความ/รูป/ชื่อ นร.) แบบลากวางอิสระ
+    "ALTER TABLE report_settings ADD COLUMN layout_json TEXT DEFAULT NULL",
   ]) {
     await db.query(col).catch(() => {});
   }
@@ -56,6 +58,8 @@ async function ensureStudentTable() {
       PRIMARY KEY (student_code)
     )
   `);
+  // layout_json = ตำแหน่ง/ขนาดเฉพาะคน (partial — เก็บเฉพาะชิ้นที่ต่างจากค่ากลาง)
+  await db.query('ALTER TABLE report_student_settings ADD COLUMN layout_json TEXT DEFAULT NULL').catch(() => {});
 }
 ensureStudentTable();
 
@@ -74,6 +78,32 @@ const nullableInt = (v, min, max) => {
   return Number.isFinite(n) ? clamp(n, min, max) : null;
 };
 const nullableBool = (v) => (v === null || v === undefined || v === '' ? null : (v ? 1 : 0));
+
+// layout_json: รับได้ทั้ง string หรือ object → คืน JSON string ที่สะอาด หรือ null ถ้าว่าง/พัง
+// กันค่าเพี้ยน: เก็บเฉพาะ x,y,w,h,scale ที่เป็นตัวเลขจำกัดช่วง canvas 1080
+const sanitizeLayoutJson = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  let obj = v;
+  if (typeof v === 'string') {
+    try { obj = JSON.parse(v); } catch { return null; }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const num = (n, min, max) => (Number.isFinite(Number(n)) ? clamp(Number(n), min, max) : undefined);
+  const out = {};
+  for (const [key, box] of Object.entries(obj)) {
+    if (!box || typeof box !== 'object') continue;
+    const b = {};
+    if (box.x !== undefined)     b.x = num(box.x, -2000, 2000);
+    if (box.y !== undefined)     b.y = num(box.y, -2000, 2000);
+    if (box.w !== undefined)     b.w = num(box.w, 8, 2000);
+    if (box.h !== undefined)     b.h = num(box.h, 8, 2000);
+    if (box.scale !== undefined) b.scale = num(box.scale, 0.2, 6);
+    // ตัด undefined ออก
+    for (const k of Object.keys(b)) if (b[k] === undefined) delete b[k];
+    if (Object.keys(b).length > 0) out[key] = b;
+  }
+  return Object.keys(out).length > 0 ? JSON.stringify(out) : null;
+};
 
 // ─── Multer: background image upload ──────────────────────────────────────────
 const makeStorage = (subdir, prefix) => multer.diskStorage({
@@ -106,7 +136,7 @@ router.get('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── PUT /api/report-settings ─────────────────────────────────────────────────
 router.put('/', verifyToken, adminOnly, async (req, res) => {
-  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale, photo_overflow, photo_offset_y, name_bg_color, name_bg_opacity, info_offset_y, confirm_color, confirm_opacity } = req.body;
+  const { congrats_text, show_quote, school_name, text_color, show_photo_frame, photo_scale, photo_overflow, photo_offset_y, name_bg_color, name_bg_opacity, info_offset_y, confirm_color, confirm_opacity, layout_json } = req.body;
   // จำกัดช่วงค่ากันเพี้ยน
   const scale     = Math.min(300, Math.max(50, Number(photo_scale) || 100));
   const offsetY   = Math.min(300, Math.max(-300, Number(photo_offset_y) || 0));
@@ -114,10 +144,11 @@ router.put('/', verifyToken, adminOnly, async (req, res) => {
   const infoY     = Math.min(300, Math.max(-300, Number(info_offset_y) || 0));
   const _co       = Number(confirm_opacity);
   const confirmOp = Math.min(100, Math.max(0, Number.isFinite(_co) ? _co : 22));
+  const layout    = sanitizeLayoutJson(layout_json);
   try {
     await db.query(
-      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ?, photo_overflow = ?, photo_offset_y = ?, name_bg_color = ?, name_bg_opacity = ?, info_offset_y = ?, confirm_color = ?, confirm_opacity = ? WHERE id = 1',
-      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale, photo_overflow ? 1 : 0, offsetY, name_bg_color ?? '#000000', nameOp, infoY, confirm_color ?? '#22c55e', confirmOp]
+      'UPDATE report_settings SET congrats_text = ?, show_quote = ?, school_name = ?, text_color = ?, show_photo_frame = ?, photo_scale = ?, photo_overflow = ?, photo_offset_y = ?, name_bg_color = ?, name_bg_opacity = ?, info_offset_y = ?, confirm_color = ?, confirm_opacity = ?, layout_json = ? WHERE id = 1',
+      [congrats_text ?? '', show_quote ? 1 : 0, school_name ?? '', text_color ?? '#ffffff', show_photo_frame ? 1 : 0, scale, photo_overflow ? 1 : 0, offsetY, name_bg_color ?? '#000000', nameOp, infoY, confirm_color ?? '#22c55e', confirmOp, layout]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -150,14 +181,16 @@ router.put('/students/:code', verifyToken, adminOnly, async (req, res) => {
   const offsetY = nullableInt(req.body.photo_offset_y, -300, 300);
   const infoY   = nullableInt(req.body.info_offset_y, -300, 300);
   const overflow = nullableBool(req.body.photo_overflow);
+  const layout  = sanitizeLayoutJson(req.body.layout_json);
 
   try {
     await db.query(
-      `INSERT INTO report_student_settings (student_code, photo_scale, photo_offset_y, photo_overflow, info_offset_y)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO report_student_settings (student_code, photo_scale, photo_offset_y, photo_overflow, info_offset_y, layout_json)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE photo_scale = VALUES(photo_scale), photo_offset_y = VALUES(photo_offset_y),
-                               photo_overflow = VALUES(photo_overflow), info_offset_y = VALUES(info_offset_y)`,
-      [code, scale, offsetY, overflow, infoY]
+                               photo_overflow = VALUES(photo_overflow), info_offset_y = VALUES(info_offset_y),
+                               layout_json = VALUES(layout_json)`,
+      [code, scale, offsetY, overflow, infoY, layout]
     );
     res.json({ ok: true });
   } catch (err) {
