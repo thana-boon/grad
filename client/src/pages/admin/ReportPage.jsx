@@ -253,6 +253,8 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
               width: 240, height: 360,
               borderRadius: showFrame ? 20 : 0,
               overflow: allowOverflow ? 'visible' : 'hidden',
+              // clip-path บังคับตัดรูปตามกรอบแม้ตอน print/PDF — overflow:hidden ตัด child ที่มี transform ไม่อยู่บน Chrome print
+              clipPath: allowOverflow ? undefined : `inset(0 round ${showFrame ? 20 : 0}px)`,
               border: showFrame ? `4px solid ${textColor}dd` : 'none',
               // โหมดล้นกรอบ: พื้นหลังต้องโปร่งใส ไม่งั้นจะบังรูปที่อยู่ชั้นหลัง
               background: showFrame && !allowOverflow ? '#555' : 'transparent',
@@ -344,6 +346,12 @@ export default function ReportPage() {
   const [logoUploading, setLogoUploading] = useState(false);
   const bgInputRef = useRef(null);
   const logoInputRef = useRef(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Load settings + year + students
   useEffect(() => {
@@ -351,7 +359,12 @@ export default function ReportPage() {
       api.get('/report-settings'),
       api.get('/academic-years'),
       api.get('/academic-years/active').then(r => r.data || null).catch(() => null),
-      api.get('/report-settings/students').then(r => r.data || {}).catch(() => ({})),
+      api.get('/report-settings/students').then(r => r.data || {}).catch((err) => {
+        // แยกแยะ: endpoint ไม่มีบน server (ยังไม่ deploy) vs ปัญหาอื่น
+        console.error('โหลดค่าเฉพาะรายคนไม่สำเร็จ', err);
+        showToast('โหลดค่าเฉพาะรายคนไม่สำเร็จ — server อาจยังไม่อัปเดต', 'error');
+        return {};
+      }),
     ]).then(([sRes, yRes, activeRes, ovRes]) => {
       setSettings(sRes.data || { congrats_text: '', show_quote: true, background_image_url: null });
       setOverrides(ovRes);
@@ -382,6 +395,7 @@ export default function ReportPage() {
 
   const saveSettings = async () => {
     setSaving(true);
+    const codes = [...dirtyCodes];
     try {
       await api.put('/report-settings', {
         congrats_text: settings.congrats_text,
@@ -398,12 +412,26 @@ export default function ReportPage() {
         confirm_color: settings.confirm_color,
         confirm_opacity: settings.confirm_opacity,
       });
-      await Promise.all(
-        [...dirtyCodes].map(code =>
+      // เซฟค่าเฉพาะรายคน — เก็บผลรายตัวเพื่อรู้ว่ามีอันไหน fail
+      const results = await Promise.allSettled(
+        codes.map(code =>
           api.put(`/report-settings/students/${code}`, overrides[code] || {})
         )
       );
-      setDirtyCodes(new Set());
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length > 0) {
+        console.error('บันทึกค่าเฉพาะรายคนไม่สำเร็จ', failed.map(f => f.reason));
+        // เอาเฉพาะที่ fail กลับเข้า dirty เพื่อให้กดเซฟซ้ำได้ ที่สำเร็จเอาออก
+        const failedCodes = new Set(codes.filter((_, i) => results[i].status === 'rejected'));
+        setDirtyCodes(failedCodes);
+        showToast(`บันทึกค่ากลางแล้ว แต่ค่าเฉพาะรายคน ${failed.length} คนไม่สำเร็จ`, 'error');
+      } else {
+        setDirtyCodes(new Set());
+        showToast(codes.length > 0 ? `บันทึกสำเร็จ (รวมเฉพาะคน ${codes.length} คน) ✅` : 'บันทึกสำเร็จ ✅');
+      }
+    } catch (err) {
+      console.error('บันทึกการตั้งค่าไม่สำเร็จ', err);
+      showToast('บันทึกไม่สำเร็จ — ตรวจสอบการเชื่อมต่อ / สิทธิ์ผู้ใช้', 'error');
     } finally {
       setSaving(false);
     }
@@ -533,7 +561,8 @@ export default function ReportPage() {
   const exportPdf = () => {
     if (students.length === 0) return;
     // Store data in localStorage for print page
-    localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, overrides, yearName }));
+    // approvedCodes: ส่งรายชื่อที่อนุมัติคำคมไปด้วย เพื่อให้ PDF ตรงกับตัวอย่าง (Set แปลงเป็น array)
+    localStorage.setItem('gradtrack-print-data', JSON.stringify({ students, settings, overrides, yearName, approvedCodes: [...approvedQuotes] }));
     window.open(`${import.meta.env.BASE_URL}admin/report/print`, '_blank');
   };
 
@@ -588,6 +617,15 @@ export default function ReportPage() {
 
   return (
     <div className="p-4 flex flex-col gap-4 min-h-screen">
+      {/* Toast */}
+      {toast && (
+        <div className="toast toast-top toast-end z-[100000]">
+          <div className={`alert alert-${toast.type === 'error' ? 'error' : 'success'} py-2 text-sm`}>
+            {toast.msg}
+          </div>
+        </div>
+      )}
+
       <h1 className="text-xl font-bold">📊 รายงานผลการสอบ</h1>
 
       {/* Full-screen overlay during export — hides the card rendered at top-left for html2canvas */}
