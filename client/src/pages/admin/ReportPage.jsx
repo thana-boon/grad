@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import html2canvas from 'html2canvas';
+import { domToCanvas } from 'modern-screenshot';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import api from '../../utils/api';
@@ -100,30 +100,32 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
       background: '#0f0c29',
       boxSizing: 'border-box',
     }}>
-      {/* Background image */}
+      {/* Background image — background-image (cover) แทน object-fit กัน html2canvas ยืดภาพ */}
       {settings.background_image_url && (
-        <img
-          src={resolveMediaUrl(settings.background_image_url)}
-          crossOrigin="anonymous"
-          alt=""
+        <div
           style={{
             position: 'absolute', inset: 0,
-            width: '100%', height: '100%',
-            objectFit: 'cover', zIndex: 0,
+            backgroundImage: `url(${resolveMediaUrl(settings.background_image_url)})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            zIndex: 0,
           }}
         />
       )}
 
       {/* School Logo — absolute top-left corner */}
+      {/* ใช้ background-image (contain) แทน <img object-fit> — html2canvas 1.4.1 ตี object-fit เป็น fill ทำให้ตรายืด */}
       {settings.school_logo_url && (
-        <img
-          src={resolveMediaUrl(settings.school_logo_url)}
-          crossOrigin="anonymous"
-          alt=""
+        <div
           style={{
             position: 'absolute', top: 24, left: 28,
             width: 96, height: 96,
-            objectFit: 'contain', zIndex: 2,
+            backgroundImage: `url(${resolveMediaUrl(settings.school_logo_url)})`,
+            backgroundSize: 'contain',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            zIndex: 2,
           }}
         />
       )}
@@ -206,11 +208,14 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                         boxSizing: 'border-box',
                       }}>
                         {g.logo_url && (
-                          <img
-                            src={resolveMediaUrl(g.logo_url)}
-                            crossOrigin="anonymous"
-                            alt=""
-                            style={{ width: logoSize, height: logoSize, objectFit: 'contain', flexShrink: 0 }}
+                          <div
+                            style={{
+                              width: logoSize, height: logoSize, flexShrink: 0,
+                              backgroundImage: `url(${resolveMediaUrl(g.logo_url)})`,
+                              backgroundSize: 'contain',
+                              backgroundPosition: 'center',
+                              backgroundRepeat: 'no-repeat',
+                            }}
                           />
                         )}
                         <div style={{ flex: isVertical ? undefined : 1, minWidth: 0, textAlign: isVertical ? 'center' : 'left' }}>
@@ -245,11 +250,17 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
           <div style={{
             flex: 1,
             display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            gap: 14,
+            alignItems: 'center',
           }}>
+            {/* จัดกึ่งกลางแนวตั้งด้วย margin:auto + ใช้ block layout ข้างใน (ไม่ใช่ flex column)
+                — html2canvas เรนเดอร์ block margin ตรงเป๊ะ ต่างจาก flex แนวตั้งที่แทรกช่องว่างเกิน ทำให้ชื่อหล่นห่างจากรูป */}
+            <div style={{
+              width: '100%',
+              margin: 'auto 0',
+            }}>
             {/* Photo */}
             <div style={{
+              margin: '0 auto',
               width: 240, height: 360,
               borderRadius: showFrame ? 20 : 0,
               overflow: allowOverflow ? 'visible' : 'hidden',
@@ -287,14 +298,15 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
               }
             </div>
 
-            {/* Name + Quote + กล่องยืนยัน — เลื่อนขึ้น/ลงพร้อมกัน */}
+            {/* Name + Quote + กล่องยืนยัน — เลื่อนขึ้น/ลงพร้อมกัน
+                block layout + margin ล้วน (ไม่มี flex) — html2canvas เรนเดอร์แนวตั้งตรงที่สุด */}
             <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
-              width: '100%', boxSizing: 'border-box',
-              transform: `translateY(${infoOffsetY}px)`,
+              width: '100%', boxSizing: 'border-box', textAlign: 'center',
+              marginTop: 14 + infoOffsetY,
             }}>
               {/* Name */}
               <div style={{
+                display: 'inline-block',
                 fontSize: nameFontSize, fontWeight: 700, textAlign: 'center', lineHeight: 1.3, color: textColor,
                 background: nameBg,
                 padding: nameBgOpacity > 0 ? '8px 22px' : 0,
@@ -309,7 +321,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
               {!!settings.show_quote && !!student.quote && quoteApproved && (
                 <div style={{
                   fontSize: 18, fontStyle: 'italic', textAlign: 'center',
-                  opacity: 0.75, lineHeight: 1.6, maxWidth: 360,
+                  opacity: 0.75, lineHeight: 1.6, maxWidth: 360, margin: '14px auto 0',
                 }}>
                   "{student.quote}"
                 </div>
@@ -321,7 +333,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                   background: confirmBg,
                   border: `2px solid ${confirmBorder}`,
                   borderRadius: 14, padding: '12px 16px',
-                  textAlign: 'center', width: '100%', boxSizing: 'border-box',
+                  textAlign: 'center', width: '100%', boxSizing: 'border-box', marginTop: 14,
                 }}>
                   <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
                   <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
@@ -332,6 +344,7 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                   </div>
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>
@@ -541,13 +554,13 @@ export default function ReportPage() {
     await new Promise(r => setTimeout(r, 50));
 
     try {
-      // จับภาพ container ตามขนาดจริง (1080×1080) ตรงๆ — ไม่ส่ง width/height/window
-      // เพื่อเลี่ยง logic crop ของ html2canvas ที่ทำให้สัดส่วนเพี้ยน (ภาพยืด/หัวแบน)
-      return await html2canvas(container, {
-        useCORS: true, allowTaint: false,
-        scale, logging: false,
-        imageTimeout: 15000,
+      // modern-screenshot ใช้เทคนิค SVG foreignObject = เบราว์เซอร์เรนเดอร์เลย์เอาต์เองจริงๆ
+      // ผลลัพธ์ตรงกับที่เห็นบนจอ 100% (ต่างจาก html2canvas ที่เลียนแบบการเรนเดอร์แล้วระยะ/สัดส่วนคลาด)
+      return await domToCanvas(container, {
+        width: 1080, height: 1080,
+        scale,
         backgroundColor: '#0f0c29',
+        fetch: { requestInit: { mode: 'cors' } },
       });
     } finally {
       root.unmount();
@@ -576,7 +589,8 @@ export default function ReportPage() {
         resolveMediaUrl(settings.school_logo_url),
       ]);
       await document.fonts.ready;
-      const canvas = await renderCardCanvas(previewStudent);
+      // scale 4 = คมชัดสุด (4320×4320) สำหรับดาวน์โหลดคนเดียว
+      const canvas = await renderCardCanvas(previewStudent, 4);
       const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
       if (blob) saveAs(blob, `${previewStudent.student_code}_${previewStudent.first_name}_${previewStudent.last_name}.png`);
       setExportProgress(100);
@@ -587,6 +601,122 @@ export default function ReportPage() {
       setExporting(false);
       setExportProgress(0);
     }
+  };
+
+  // ── เซฟ PDF คนเดียว (คนที่พรีวิว) — จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่าน print dialog / ไม่โดนย่อ A4 ──
+  const exportOnePdf = async () => {
+    if (!previewStudent) return;
+    setExporting(true);
+    setExportProgress(0);
+    try {
+      await preloadImages([
+        resolveMediaUrl(settings.background_image_url),
+        resolveMediaUrl(settings.school_logo_url),
+      ]);
+      await document.fonts.ready;
+      const { jsPDF } = await import('jspdf');
+      // scale 3 + PNG = คมชัด ไม่มี artifact สำหรับหน้าเดียว
+      const canvas = await renderCardCanvas(previewStudent, 3);
+      const img = canvas.toDataURL('image/png');
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'px', format: [1080, 1080], compress: true });
+      addFittedImage(doc, img, 'PNG', canvas.width, canvas.height);
+      doc.save(`${previewStudent.student_code}_${previewStudent.first_name}_${previewStudent.last_name}.pdf`);
+      setExportProgress(100);
+    } catch (err) {
+      console.error('เซฟ PDF คนนี้ไม่สำเร็จ', err);
+      showToast('เซฟ PDF คนนี้ไม่สำเร็จ', 'error');
+    } finally {
+      setExporting(false);
+      setExportProgress(0);
+    }
+  };
+
+  // ── เปิดการ์ดในแท็บใหม่ (เรนเดอร์ด้วยเบราว์เซอร์จริง — สวยเป๊ะเท่าพรีวิว ไม่พึ่ง html2canvas) ──
+  // list = อาเรย์นักเรียน (undefined = เฉพาะคนที่พรีวิวอยู่)
+  const openInNewTab = async (list) => {
+    const arr = Array.isArray(list) ? list : (previewStudent ? [previewStudent] : []);
+    if (arr.length === 0) return;
+    // เรนเดอร์การ์ดทุกคนเป็น HTML จริงก่อน แล้วคัด innerHTML ไปเปิดแท็บใหม่
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:-99999px;top:0;width:1080px;';
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    root.render(
+      <>
+        {arr.map(s => (
+          <div key={s.student_code} className="slot"><div className="card-page">
+            <StudentCard
+              student={s}
+              settings={mergeStudentSettings(settings, overrides[normCode(s.student_code)])}
+              yearName={yearName}
+              quoteApproved={approvedQuotes.has(s.student_code)}
+            />
+          </div></div>
+        ))}
+      </>
+    );
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cardsHtml = container.innerHTML;
+    root.unmount();
+    document.body.removeChild(container);
+
+    const win = window.open('', '_blank');
+    if (!win) {
+      showToast('เบราว์เซอร์บล็อกการเปิดแท็บใหม่ — อนุญาต popup ก่อน', 'error');
+      return;
+    }
+    const title = arr.length === 1
+      ? `${arr[0].title_prefix || ''}${arr[0].first_name} ${arr[0].last_name} (${arr[0].student_code})`
+      : `รายงานผล ${yearName} — ${arr.length} คน`;
+    win.document.write(`<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="${window.location.origin}/">
+<title>${title}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;700&family=Noto+Sans+Thai:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* บังคับพิมพ์ background (รูปนักเรียน/โลโก้/ตรา/พื้นหลัง เป็น background-image ทั้งหมด)
+     ไม่งั้นเบราว์เซอร์จะไม่พิมพ์ background โดยดีฟอลต์ → เห็นแต่ตัวหนังสือ */
+  *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;color-adjust:exact !important;}
+  html,body{margin:0;padding:0;background:#1a1a2e;font-family:'Prompt','Noto Sans Thai',sans-serif;}
+  body{display:flex;flex-direction:column;align-items:center;gap:24px;padding:24px 0;box-sizing:border-box;}
+  .slot{position:relative;box-shadow:0 10px 40px rgba(0,0,0,.4);overflow:hidden;}
+  .card-page{width:1080px;height:1080px;}
+  @media print{
+    html,body{background:#fff;}
+    body{display:block;gap:0;padding:0;}
+    @page{size:1080px 1080px;margin:0;}
+    .slot{box-shadow:none;width:1080px!important;height:1080px!important;overflow:visible;page-break-after:always;break-after:page;}
+    .slot:last-child{page-break-after:auto;break-after:auto;}
+    .card-page{transform:none!important;}
+  }
+</style>
+</head>
+<body>
+  ${cardsHtml}
+  <script>
+    (function(){
+      function layout(){
+        var scale=Math.min(1,(window.innerWidth-40)/1080);
+        var slots=document.querySelectorAll('.slot');
+        for(var i=0;i<slots.length;i++){
+          var card=slots[i].firstElementChild;
+          card.style.transform='scale('+scale+')';
+          card.style.transformOrigin='top left';
+          slots[i].style.width=(1080*scale)+'px';
+          slots[i].style.height=(1080*scale)+'px';
+        }
+      }
+      window.addEventListener('resize',layout);layout();
+    })();
+  <\/script>
+</body>
+</html>`);
+    win.document.close();
   };
 
   const exportZip = async () => {
@@ -1221,14 +1351,38 @@ export default function ReportPage() {
                 </div>
               )}
 
-              <div className="flex gap-2 w-full sm:w-auto">
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end">
+                <button
+                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={() => openInNewTab()}
+                  disabled={!previewStudent}
+                  title="เปิดการ์ดคนนี้ในแท็บใหม่ (เรนเดอร์ด้วยเบราว์เซอร์ — สวยเป๊ะ, กด Ctrl+P สั่งพิมพ์/เซฟ PDF ได้)"
+                >
+                  🖼️ เปิดคนนี้
+                </button>
+                <button
+                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={() => openInNewTab(students)}
+                  disabled={students.length === 0}
+                  title="เปิดการ์ดทุกคนในแท็บใหม่ (สวยเป๊ะ, กด Ctrl+P แล้วเลือก Save as PDF ได้ทั้งชั้น)"
+                >
+                  🗂️ เปิดทุกคน
+                </button>
+                <button
+                  className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"
+                  onClick={exportOnePdf}
+                  disabled={exporting || !previewStudent}
+                  title="เซฟการ์ดคนนี้เป็น PDF จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่านหน้าปริ้น ไม่โดนย่อ A4"
+                >
+                  📄 เซฟ PDF คนนี้
+                </button>
                 <button
                   className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
                   onClick={exportOne}
                   disabled={exporting || !previewStudent}
-                  title="ดาวน์โหลดเฉพาะคนที่พรีวิวอยู่ (PNG) — ไว้เทสเร็ว"
+                  title="ดาวน์โหลดเฉพาะคนที่พรีวิวอยู่ เป็นรูป PNG"
                 >
-                  ⬇️ โหลดคนนี้
+                  🖼️ PNG คนนี้
                 </button>
                 <button
                   className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"

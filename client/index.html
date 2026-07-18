@@ -7,7 +7,9 @@
     <title>GradTrack</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet" />
+    <!-- crossorigin จำเป็นสำหรับหน้า Report: ให้ modern-screenshot อ่าน @font-face แล้วฝังฟอนต์ลงภาพ export ได้
+         และโหลดน้ำหนัก 700 ด้วย เพราะการ์ดรายงานใช้ตัวหนา 700 จริง -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
   </head>
   <body>
     <div id="root"></div>
