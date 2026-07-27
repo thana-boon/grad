@@ -1,0 +1,21 @@
+**/node_modules
+**/dist
+**/.vite
+**/logs
+**/*.log
+
+# ห้ามให้ .env หลุดเข้า image เด็ดขาด — ค่าจริงมาจาก compose environment เท่านั้น
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+.git
+.gitignore
+.claude
+.vscode
+uploads
+server/uploads
+README.md
+API-KEYS.md

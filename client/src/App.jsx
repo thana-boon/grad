@@ -40,7 +40,7 @@ export default function App() {
           <Route
             path="/admin/academic-years"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="academic-years" />
               </ProtectedRoute>
             }
@@ -48,7 +48,7 @@ export default function App() {
           <Route
             path="/admin/students"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="students" />
               </ProtectedRoute>
             }
@@ -56,7 +56,7 @@ export default function App() {
           <Route
             path="/admin/universities"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="universities" />
               </ProtectedRoute>
             }
@@ -64,7 +64,7 @@ export default function App() {
           <Route
             path="/admin/university-students"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="university-students" />
               </ProtectedRoute>
             }
@@ -72,7 +72,7 @@ export default function App() {
           <Route
             path="/admin/faculties"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="faculties" />
               </ProtectedRoute>
             }
@@ -80,7 +80,7 @@ export default function App() {
           <Route
             path="/admin/admission-status"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="admission-status" />
               </ProtectedRoute>
             }
@@ -88,7 +88,7 @@ export default function App() {
           <Route
             path="/admin/report"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="report" />
               </ProtectedRoute>
             }
@@ -98,7 +98,7 @@ export default function App() {
           <Route
             path="/admin/report-table"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="report-table" />
               </ProtectedRoute>
             }
@@ -106,7 +106,7 @@ export default function App() {
           <Route
             path="/admin/activity-log"
             element={
-              <ProtectedRoute allowedRole="admin">
+              <ProtectedRoute allowedRole="staff">
                 <DashboardPage activePage="activity-log" />
               </ProtectedRoute>
             }

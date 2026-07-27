@@ -1,0 +1,93 @@
+# GradTrack — app อย่างเดียว (Node/Express :3003)
+# DB ใช้ postgres-core ที่มีอยู่แล้วบน network "school-net" (ไม่สร้าง container db เอง)
+#
+# รัน:  docker compose up -d --build
+# Portainer: ไฟล์นี้ต้องขึ้นได้โดยไม่มีคำถามใด ๆ —
+#   * ไม่มี service ที่รอ confirm (seed ผูกกับ profile ต้องสั่งเองถึงจะรัน)
+#   * ทุกค่าลับมาจาก stack env ไม่มีค่าจริงเขียนไว้ในไฟล์นี้
+#   * :? = ไม่ตั้งแล้วหยุดทันทีพร้อมบอกเหตุผล ดีกว่าขึ้นแล้วพังตอนมีคนใช้
+services:
+  app:
+    build:
+      context: .
+      args:
+        # base path ถูก bake ตอน vite build → ต้องส่งเป็น build arg
+        # ไม่ตั้งเลย = /gradtrack (ตรงกับ nginx portal ที่ forward /gradtrack/... มาโดยคง prefix)
+        # ตั้ง BASE_PATH= (ค่าว่าง) = เสิร์ฟที่ root — ใช้ตอนเทสในเครื่อง
+        # ใช้ ${VAR-default} ไม่ใช่ :- เพื่อให้ค่าว่างที่ตั้งใจตั้งมีผลจริง
+        BASE_PATH: ${BASE_PATH-/gradtrack}
+    image: gradtrack-app
+    container_name: gradtrack-app
+    environment:
+      NODE_ENV: production
+      PORT: "3003"
+      TZ: Asia/Bangkok
+      # ต้องเป็นค่าเดียวกับ build arg ข้างบน ไม่งั้น express mount คนละ prefix
+      # กับที่ asset ถูก bake ไว้ → หน้าขึ้นแต่ JS/CSS 404
+      BASE_PATH: ${BASE_PATH-/gradtrack}
+
+      # ในเน็ตเวิร์ก school-net เรียก postgres-core ด้วยชื่อ service (พอร์ตภายใน 5432)
+      DATABASE_URL: postgres://${GRADUATE_DB_USER:-graduate}:${GRADUATE_DB_PASSWORD:?ต้องตั้ง GRADUATE_DB_PASSWORD ใน Portainer stack env}@${GRADUATE_DB_HOST:-postgres-core}:${GRADUATE_DB_PORT:-5432}/${GRADUATE_DB_NAME:-graduate}
+
+      JWT_SECRET: ${JWT_SECRET:?ต้องตั้ง JWT_SECRET ใน Portainer stack env (สุ่มยาว ๆ เช่น openssl rand -hex 32)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+
+      # SchoolOS Public API — ครูและนักเรียนล็อกอินผ่านตัวนี้
+      SCHOOLOS_API_BASE: ${SCHOOLOS_API_BASE:-http://192.168.200.56:3002}
+      SCHOOLOS_API_KEY: ${SCHOOLOS_API_KEY:?ต้องตั้ง SCHOOLOS_API_KEY ใน Portainer stack env}
+
+      # นักเรียนล็อกอินด้วยรหัสผ่าน SchoolOS เป็นหลัก
+      # ตั้ง 0 เพื่อปิดทางเดิม "Skdw+เลขบัตรประชาชน" เมื่อย้ายกันครบแล้ว
+      STUDENT_LEGACY_LOGIN: ${STUDENT_LEGACY_LOGIN:-1}
+
+      # จำนวน proxy hop ที่เชื่อ X-Forwarded-For (nginx portal = 1)
+      # ผิดค่านี้ = rate limit ตอน login นับรวมทั้งโรงเรียนเป็นถังเดียว
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+
+      # ไม่มี env admin — สิทธิ์ admin มาจาก role "teacher-admin" ของ SchoolOS โดยตรง
+    ports:
+      - "3003:3003"
+    networks:
+      - school-net
+    volumes:
+      # รูปนักเรียน / โลโก้มหาวิทยาลัย / พื้นหลังการ์ดรายงาน
+      # ต้องอยู่ใน named volume ไม่งั้นหายทุกครั้งที่ pull & redeploy
+      - gradtrack-uploads:/app/server/uploads
+      - gradtrack-logs:/app/server/logs
+    healthcheck:
+      # ยิงที่ root เสมอ — index.js เปิด /api/health ไว้ทั้งใต้ BASE_PATH และที่ root
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  # ─── seed (ไม่รันอัตโนมัติ) ────────────────────────────────────────────────
+  # ผูกกับ profile "seed" → `docker compose up -d` ปกติจะไม่แตะ service นี้เลย
+  # มีไว้สร้างบัญชี admin แบบ local เป็นทางเข้าสำรองตอน SchoolOS ล่มเท่านั้น
+  # ปกติไม่ต้องใช้ — ครูที่ SchoolOS ตั้งเป็น teacher-admin เข้าเป็น admin ได้เอง
+  #
+  # สั่งเอง:  docker compose --profile seed run --rm seed
+  seed:
+    profiles: ["seed"]
+    image: gradtrack-app
+    depends_on:
+      - app
+    environment:
+      DATABASE_URL: postgres://${GRADUATE_DB_USER:-graduate}:${GRADUATE_DB_PASSWORD:?ต้องตั้ง GRADUATE_DB_PASSWORD}@${GRADUATE_DB_HOST:-postgres-core}:${GRADUATE_DB_PORT:-5432}/${GRADUATE_DB_NAME:-graduate}
+      SEED_ADMIN_USERNAME: ${SEED_ADMIN_USERNAME:-admin}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+    networks:
+      - school-net
+    # ข้าม entrypoint (ไม่ต้องเช็ค SchoolOS key แค่จะสร้างบัญชี local)
+    entrypoint: ["node", "seed.js"]
+    restart: "no"
+
+networks:
+  school-net:
+    external: true # สร้างไว้แล้วโดยสแตก postgres-core
+
+volumes:
+  gradtrack-uploads:
+  gradtrack-logs:

@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axios from 'axios';
-
-const BASE = import.meta.env.VITE_API_URL || '/api';
+import api from '../utils/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -33,9 +31,27 @@ export default function LoginPage() {
 
     const rawUsername = form.username.trim();
 
+    // 401 = รหัสไม่ถูกเฉย ๆ → ค่อยไปลองอีกทางหนึ่งได้
+    // 403 (บัญชีถูกปิด) / 503 (API key ของระบบมีปัญหา) = คนละเรื่องกับรหัสผิด
+    // ต้องแสดงข้อความจาก server ตรง ๆ ไม่งั้นผู้ใช้เห็นแค่ "รหัสผ่านไม่ถูกต้อง" แล้วงง
+    const handleFatal = (err) => {
+      const status = err.response?.status;
+      if (status === 429) {
+        setCountdown(err.response.data?.retryAfterSeconds || 900);
+        setLoading(false);
+        return true;
+      }
+      if (status === 403 || status === 503) {
+        setError(err.response.data?.message || 'เข้าสู่ระบบไม่สำเร็จ');
+        setLoading(false);
+        return true;
+      }
+      return false;
+    };
+
     try {
-      // ลองเป็น admin ก่อน
-      const res = await axios.post(`${BASE}/auth/login`, {
+      // ลองเป็นครู/ผู้ดูแลก่อน
+      const res = await api.post('/auth/login', {
         username: rawUsername,
         password: form.password,
       });
@@ -43,29 +59,20 @@ export default function LoginPage() {
       navigate('/dashboard');
       return;
     } catch (adminErr) {
-      if (adminErr.response?.status === 429) {
-        const secs = adminErr.response.data?.retryAfterSeconds || 900;
-        setCountdown(secs);
-        setLoading(false);
-        return;
-      }
-      // admin ไม่ผ่าน → ลอง student (pad 5 หลัก)
+      if (handleFatal(adminErr)) return;
+      // ไม่ผ่านฝั่งครู → ลองเป็นนักเรียน (รหัสนักเรียน pad 5 หลัก)
     }
 
     try {
-      const res = await axios.post(`${BASE}/student/login`, {
+      const res = await api.post('/student/login', {
         username: rawUsername.padStart(5, '0'),
         password: form.password,
       });
       login(res.data.user, res.data.token);
       navigate('/student');
     } catch (studentErr) {
-      if (studentErr.response?.status === 429) {
-        const secs = studentErr.response.data?.retryAfterSeconds || 900;
-        setCountdown(secs);
-      }
+      if (handleFatal(studentErr)) return;
       setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
-    } finally {
       setLoading(false);
     }
   };

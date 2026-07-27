@@ -10,6 +10,16 @@
 *.md    text eol=lf
 *.sql   text eol=lf
 *.env   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# ไฟล์ที่รันใน container ลินุกซ์ — ต้องเป็น LF เท่านั้น
+# ถ้าโดนเช็คเอาต์เป็น CRLF บนวินโดวส์แล้ว commit ขึ้นไป คอนเทนเนอร์จะพังทันทีที่สตาร์ท
+# ด้วย error กำกวมแบบ "no such file or directory" (จริง ๆ คือ \r ติดท้ายบรรทัด shebang)
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+.dockerignore text eol=lf
+.env.example  text eol=lf
 
 # Binary files
 *.png   binary

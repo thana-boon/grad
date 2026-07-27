@@ -37,134 +37,17 @@ const excelUpload = multer({
   },
 }).single('file');
 
-// ─── ensureTables ─────────────────────────────────────────────────────────
-const ensureTables = async () => {
-  // Check if universities table has old schema (column 'name' instead of 'name_th')
-  const [cols] = await db.query(`
-    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'universities'
-  `);
-  const colNames = cols.map(c => c.COLUMN_NAME);
+// universities / faculties / programs สร้างโดย migration ตอนสตาร์ท
+// (database/postgres/001_init.sql)
+//
+// เดิมไฟล์นี้มี ensureTables() ยาว ~130 บรรทัดที่คอย ALTER/DROP INDEX ตอนรับ request
+// เพื่อไล่ migrate schema เก่าของ MySQL — ตัดออกทั้งหมดตอนย้ายมา Postgres เพราะ
+//   1. schema เริ่มใหม่หมด ไม่มีของเก่าให้ต้อง migrate
+//   2. deploy ผ่าน Portainer เป็น push แบบไม่ถามใคร → DDL ที่ทำข้อมูลหายห้ามอยู่ใน request path
+// เพิ่มคอลัมน์ใหม่ให้ไปเพิ่มในไฟล์ migration (ADD COLUMN IF NOT EXISTS) เท่านั้น
 
-  if (colNames.length > 0 && colNames.includes('name') && !colNames.includes('name_th')) {
-    // Old schema — migrate columns
-    await db.query('ALTER TABLE `universities` CHANGE COLUMN `name` `name_th` VARCHAR(255) NOT NULL');
-    if (!colNames.includes('name_en'))         await db.query('ALTER TABLE `universities` ADD COLUMN `name_en` VARCHAR(255) DEFAULT NULL AFTER `name_th`');
-    if (!colNames.includes('short_name'))       await db.query('ALTER TABLE `universities` ADD COLUMN `short_name` VARCHAR(50) DEFAULT NULL AFTER `name_en`');
-    if (!colNames.includes('university_type'))  await db.query('ALTER TABLE `universities` ADD COLUMN `university_type` VARCHAR(50) DEFAULT NULL AFTER `short_name`');
-    if (!colNames.includes('updated_at'))       await db.query('ALTER TABLE `universities` ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
-    // Add unique key if missing
-    const [keys] = await db.query(`SHOW INDEX FROM \`universities\` WHERE Key_name = 'uk_name_th'`);
-    if (!keys.length) {
-      await db.query('ALTER TABLE `universities` ADD UNIQUE KEY `uk_name_th` (`name_th`)').catch(() => {});
-    }
-  }
-
-  // Migrate faculties if old schema
-  const [fcols] = await db.query(`
-    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'faculties'
-  `);
-  const fColNames = fcols.map(c => c.COLUMN_NAME);
-  if (fColNames.length > 0 && fColNames.includes('name') && !fColNames.includes('name_th')) {
-    await db.query('ALTER TABLE `faculties` CHANGE COLUMN `name` `name_th` VARCHAR(255) NOT NULL');
-    if (!fColNames.includes('name_en')) await db.query('ALTER TABLE `faculties` ADD COLUMN `name_en` VARCHAR(255) DEFAULT NULL AFTER `name_th`');
-    const [fkeys] = await db.query(`SHOW INDEX FROM \`faculties\` WHERE Key_name = 'uk_uni_fac'`);
-    if (!fkeys.length) {
-      await db.query('ALTER TABLE `faculties` ADD UNIQUE KEY `uk_uni_fac` (`university_id`, `name_th`)').catch(() => {});
-    }
-  }
-
-  // Create tables if not exist (new schema)
-  if (colNames.length === 0) {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS \`universities\` (
-        \`id\`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        \`name_th\`         VARCHAR(255) NOT NULL,
-        \`name_en\`         VARCHAR(255) DEFAULT NULL,
-        \`short_name\`      VARCHAR(50)  DEFAULT NULL,
-        \`university_type\` VARCHAR(50)  DEFAULT NULL,
-        \`logo_url\`        TEXT         DEFAULT NULL,
-        \`created_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-        \`updated_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY \`uk_name_th\` (\`name_th\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-  }
-  if (fColNames.length === 0) {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS \`faculties\` (
-        \`id\`            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        \`university_id\` INT UNSIGNED NOT NULL,
-        \`name_th\`       VARCHAR(255) NOT NULL,
-        \`name_en\`       VARCHAR(255) DEFAULT NULL,
-        \`created_at\`    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE KEY \`uk_uni_fac\` (\`university_id\`, \`name_th\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-  }
-
-  // Programs table — check and create/migrate
-  const [pcols] = await db.query(`
-    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'programs'
-  `);
-  const pColNames = pcols.map(c => c.COLUMN_NAME);
-  if (pColNames.length > 0 && pColNames.includes('name') && !pColNames.includes('program_name_th')) {
-    await db.query('ALTER TABLE `programs` CHANGE COLUMN `name` `program_name_th` VARCHAR(500) NOT NULL');
-    if (!pColNames.includes('program_name_en')) await db.query('ALTER TABLE `programs` ADD COLUMN `program_name_en` VARCHAR(500) DEFAULT NULL AFTER `program_name_th`');
-    if (!pColNames.includes('campus'))          await db.query('ALTER TABLE `programs` ADD COLUMN `campus` VARCHAR(100) DEFAULT NULL AFTER `faculty_id`');
-    if (!pColNames.includes('group_field'))     await db.query('ALTER TABLE `programs` ADD COLUMN `group_field` VARCHAR(100) DEFAULT NULL AFTER `campus`');
-    if (!pColNames.includes('field_name_th'))   await db.query('ALTER TABLE `programs` ADD COLUMN `field_name_th` VARCHAR(255) DEFAULT NULL AFTER `group_field`');
-    if (!pColNames.includes('field_name_en'))   await db.query('ALTER TABLE `programs` ADD COLUMN `field_name_en` VARCHAR(255) DEFAULT NULL AFTER `field_name_th`');
-    if (!pColNames.includes('program_type'))    await db.query('ALTER TABLE `programs` ADD COLUMN `program_type` VARCHAR(50) DEFAULT NULL AFTER `program_name_en`');
-  }
-  // Drop any old unique key on programs (uk_faculty_program) — programs can have same name with diff campus/type
-  if (pColNames.length > 0) {
-    const [pkeys] = await db.query(`SHOW INDEX FROM \`programs\` WHERE Key_name = 'uk_faculty_program'`);
-    if (pkeys.length) await db.query('ALTER TABLE `programs` DROP INDEX `uk_faculty_program`');
-    // Ensure program_type column exists (even on already-migrated tables)
-    if (!pColNames.includes('program_type')) {
-      await db.query('ALTER TABLE `programs` ADD COLUMN `program_type` VARCHAR(50) DEFAULT NULL');
-    }
-  }
-  if (pColNames.length === 0) {
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS \`programs\` (
-        \`id\`              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        \`university_id\`   INT UNSIGNED NOT NULL,
-        \`faculty_id\`      INT UNSIGNED DEFAULT NULL,
-        \`campus\`          VARCHAR(255) DEFAULT NULL,
-        \`faculty_name\`    VARCHAR(255) DEFAULT NULL,
-        \`group_field\`     VARCHAR(255) DEFAULT NULL,
-        \`field_name_th\`   VARCHAR(255) DEFAULT NULL,
-        \`program_name_th\` VARCHAR(500) NOT NULL,
-        \`program_type\`    VARCHAR(100) DEFAULT NULL,
-        \`created_at\`      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-  } else {
-    // Migration: add new columns if missing, make faculty_id nullable
-    const [latestCols] = await db.query(`
-      SELECT COLUMN_NAME, IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'programs'
-    `);
-    const latestColMap = Object.fromEntries(latestCols.map(c => [c.COLUMN_NAME, c]));
-
-    // Make faculty_id nullable (required for new import that doesn't use faculties FK)
-    if (latestColMap['faculty_id'] && latestColMap['faculty_id'].IS_NULLABLE === 'NO') {
-      await db.query('ALTER TABLE `programs` MODIFY COLUMN `faculty_id` INT UNSIGNED DEFAULT NULL').catch(() => {});
-    }
-    if (!latestColMap['university_id']) {
-      await db.query('ALTER TABLE `programs` ADD COLUMN `university_id` INT UNSIGNED DEFAULT NULL AFTER `id`');
-      await db.query(`UPDATE \`programs\` p JOIN \`faculties\` f ON f.id = p.faculty_id SET p.university_id = f.university_id`).catch(() => {});
-    }
-    if (!latestColMap['faculty_name']) {
-      await db.query('ALTER TABLE `programs` ADD COLUMN `faculty_name` VARCHAR(255) DEFAULT NULL AFTER `university_id`');
-      await db.query(`UPDATE \`programs\` p JOIN \`faculties\` f ON f.id = p.faculty_id SET p.faculty_name = f.name_th`).catch(() => {});
-    }
-  }
-};
+// Postgres คืน SQLSTATE 23505 เมื่อชน unique constraint (เทียบเท่า ER_DUP_ENTRY ของ MySQL)
+const isDuplicate = (err) => err.code === '23505';
 
 // ─── GET /api/universities ────────────────────────────────────────────────
 // เรียงตามประเภท (ทปอ. → ราชภัฏ → ราชมงคล → เอกชน → อื่นๆ) แล้วตามชื่อ
@@ -172,7 +55,6 @@ const TYPE_ORDER = `CASE university_type WHEN 'ทปอ.' THEN 1 WHEN 'รา�
 
 router.get('/', async (req, res) => {
   try {
-    await ensureTables();
     const { search } = req.query;
     let rows;
     if (search) {
@@ -180,7 +62,7 @@ router.get('/', async (req, res) => {
       [rows] = await db.query(
         `SELECT id, name_th AS name, name_en, short_name, university_type, logo_url
          FROM \`universities\`
-         WHERE name_th LIKE ? OR name_en LIKE ? OR short_name LIKE ?
+         WHERE name_th ILIKE ? OR name_en ILIKE ? OR short_name ILIKE ?
          ORDER BY ${TYPE_ORDER}`,
         [q, q, q]
       );
@@ -204,7 +86,6 @@ router.post('/', verifyToken, adminOnly, (req, res) => {
     const { name, short_name, name_en, university_type } = req.body;
     if (!name?.trim()) return res.status(400).json({ message: 'กรุณากรอกชื่อมหาวิทยาลัย' });
     try {
-      await ensureTables();
       let logo_url = req.body.logo_url?.trim() || null;
       if (req.file) logo_url = `/uploads/logos/${req.file.filename}`;
       await db.query(
@@ -213,7 +94,7 @@ router.post('/', verifyToken, adminOnly, (req, res) => {
       );
       res.status(201).json({ message: 'เพิ่มมหาวิทยาลัยสำเร็จ' });
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'มีชื่อนี้อยู่แล้ว' });
+      if (isDuplicate(err)) return res.status(409).json({ message: 'มีชื่อนี้อยู่แล้ว' });
       res.status(500).json({ message: err.message });
     }
   });
@@ -242,7 +123,7 @@ router.put('/:id', verifyToken, adminOnly, (req, res) => {
       }
       res.json({ message: 'อัปเดตสำเร็จ' });
     } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'มีชื่อมหาวิทยาลัยนี้อยู่แล้ว' });
+      if (isDuplicate(err)) return res.status(409).json({ message: 'มีชื่อมหาวิทยาลัยนี้อยู่แล้ว' });
       res.status(500).json({ message: err.message });
     }
   });
@@ -252,7 +133,6 @@ router.put('/:id', verifyToken, adminOnly, (req, res) => {
 // ล้างข้อมูลทั้งหมด (universities, faculties, programs) + logo files
 router.delete('/clear-all', verifyToken, adminOnly, async (req, res) => {
   try {
-    await ensureTables();
     // ลบ logo files ทั้งหมด
     if (fs.existsSync(LOGO_DIR)) {
       for (const f of fs.readdirSync(LOGO_DIR)) {
@@ -264,9 +144,10 @@ router.delete('/clear-all', verifyToken, adminOnly, async (req, res) => {
     await db.query('DELETE FROM `faculties`');
     await db.query('DELETE FROM `universities`');
     // Reset auto-increment
-    await db.query('ALTER TABLE `programs` AUTO_INCREMENT = 1');
-    await db.query('ALTER TABLE `faculties` AUTO_INCREMENT = 1');
-    await db.query('ALTER TABLE `universities` AUTO_INCREMENT = 1');
+    // Postgres ไม่มี ALTER TABLE ... AUTO_INCREMENT — id มาจาก sequence ของ SERIAL
+    await db.query('ALTER SEQUENCE programs_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE faculties_id_seq RESTART WITH 1');
+    await db.query('ALTER SEQUENCE universities_id_seq RESTART WITH 1');
     res.json({ message: 'ล้างข้อมูลทั้งหมดสำเร็จ' });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -385,7 +266,6 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'กรุณาอัปโหลดไฟล์ Excel' });
 
     try {
-      await ensureTables();
 
       // Parse Excel
       const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
@@ -435,9 +315,10 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
       await db.query('DELETE FROM `programs`');
       await db.query('DELETE FROM `faculties`');
       await db.query('DELETE FROM `universities`');
-      await db.query('ALTER TABLE `programs` AUTO_INCREMENT = 1');
-      await db.query('ALTER TABLE `faculties` AUTO_INCREMENT = 1');
-      await db.query('ALTER TABLE `universities` AUTO_INCREMENT = 1');
+      // Postgres ไม่มี ALTER TABLE ... AUTO_INCREMENT — id มาจาก sequence ของ SERIAL
+      await db.query('ALTER SEQUENCE programs_id_seq RESTART WITH 1');
+      await db.query('ALTER SEQUENCE faculties_id_seq RESTART WITH 1');
+      await db.query('ALTER SEQUENCE universities_id_seq RESTART WITH 1');
 
       // ── Build university list (deduplicate) ───────────────────────────
       const uniMap = new Map(); // name_th → id
@@ -454,7 +335,7 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
 
       for (const u of uniOrder) {
         const [result] = await db.query(
-          'INSERT INTO `universities` (name_th, university_type) VALUES (?, ?)',
+          'INSERT INTO `universities` (name_th, university_type) VALUES (?, ?) RETURNING id',
           [u.name_th, u.university_type]
         );
         uniMap.set(u.name_th, result.insertId);
@@ -482,14 +363,21 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
       }
 
       // Batch insert programs (chunks of 200)
+      // MySQL รับ `VALUES ?` แล้วกาง array 2 ชั้นให้เอง แต่ Postgres ไม่มีท่านั้น —
+      // ต้องสร้าง placeholder ($1,$2,...),($8,$9,...) ตามจำนวนแถวจริง
+      // แล้ว flatten ค่าเป็น array ชั้นเดียว (ยังเป็น parameterized query ปกติ ไม่ต่อ SQL จากข้อมูล)
+      const COLS = 7;
       const CHUNK = 200;
       for (let i = 0; i < progInserts.length; i += CHUNK) {
         const chunk = progInserts.slice(i, i + CHUNK);
+        const placeholders = chunk
+          .map((_, r) => `(${Array.from({ length: COLS }, (_, c) => `$${r * COLS + c + 1}`).join(', ')})`)
+          .join(', ');
         const [result] = await db.query(
-          `INSERT INTO \`programs\`
+          `INSERT INTO "programs"
            (university_id, campus, faculty_name, group_field, field_name_th, program_name_th, program_type)
-           VALUES ?`,
-          [chunk]
+           VALUES ${placeholders}`,
+          chunk.flat()
         );
         programCount += result.affectedRows;
       }
@@ -511,7 +399,6 @@ router.post('/import-excel', verifyToken, adminOnly, (req, res) => {
 // ดึงรายชื่อมหาวิทยาลัยจาก Wikipedia Category API (ไม่ขึ้นกับ structure ของหน้า)
 router.post('/sync-wiki-list', verifyToken, adminOnly, async (req, res) => {
   try {
-    await ensureTables();
     if (!fs.existsSync(LOGO_DIR)) fs.mkdirSync(LOGO_DIR, { recursive: true });
 
     // categories ที่พิสูจน์แล้วว่ามีในวิกิพีเดียไทย
@@ -590,8 +477,13 @@ router.post('/sync-wiki-list', verifyToken, adminOnly, async (req, res) => {
           if (shortM) short_name = shortM[1].replace(/\[\[.*?\]\]/g, '').trim() || null;
         }
 
+        // ON CONFLICT DO NOTHING = INSERT IGNORE ของ MySQL
+        // ถ้าชื่อซ้ำจะไม่คืนแถวเลย → affectedRows = 0 และ insertId = null ตามที่โค้ดข้างล่างคาด
         const [ins] = await db.query(
-          'INSERT IGNORE INTO `universities` (name_th, name_en, short_name, university_type) VALUES (?, ?, ?, ?)',
+          `INSERT INTO "universities" (name_th, name_en, short_name, university_type)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (name_th) DO NOTHING
+           RETURNING id`,
           [displayName, name_en, short_name, uni.type]
         );
 
@@ -633,13 +525,14 @@ router.post('/sync-wiki-list', verifyToken, adminOnly, async (req, res) => {
 // ค้นหาโลโก้จาก Wikipedia (ภาษาไทย) ตามชื่อมหาวิทยาลัย
 router.post('/sync-logos', verifyToken, adminOnly, async (req, res) => {
   try {
-    await ensureTables();
     const { force } = req.body;
 
+    // COALESCE แทนการเทียบ logo_url = '' สองท่อน — สั้นกว่าและไม่ต้องกังวลเรื่อง
+    // quote ซ้อน quote (MySQL รับ "" เป็นสตริงว่าง แต่ Postgres อ่านเป็นชื่อคอลัมน์)
     const [unis] = await db.query(
       force
         ? 'SELECT id, name_th, name_en, short_name FROM `universities` ORDER BY id'
-        : 'SELECT id, name_th, name_en, short_name FROM `universities` WHERE (logo_url IS NULL OR logo_url = "") ORDER BY id'
+        : `SELECT id, name_th, name_en, short_name FROM "universities" WHERE COALESCE(logo_url, '') = '' ORDER BY id`
     );
 
     if (unis.length === 0) {

@@ -6,12 +6,16 @@ Thumbs.db
 node_modules/
 
 # Environment variables (ห้าม commit ขึ้น git เด็ดขาด)
+# รหัสผ่าน DB / JWT_SECRET / SCHOOLOS_API_KEY ต้องอยู่ในไฟล์เหล่านี้เท่านั้น
+# ห้ามเขียนลงในโค้ดหรือ docker-compose.yml — ดูตัวอย่างค่าที่ .env.example
 .env
 .env.local
 .env.production
 **/.env
 **/.env.local
 **/.env.production
+# .env.example ไม่มีค่าจริง — ต้อง commit ขึ้นไปเป็นเอกสาร
+!.env.example
 
 # Build output
 client/dist/

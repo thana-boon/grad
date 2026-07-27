@@ -1,48 +1,53 @@
 /**
- * Seed script — สร้าง admin user เริ่มต้น
- * รัน: node seed.js
+ * Seed — สร้างบัญชี admin แบบ local (ทางเข้าสำรองตอน SchoolOS ล่ม)
+ *
+ * ปกติ "ไม่ต้องรัน": ผู้ดูแลของ GradTrack มาจาก role teacher-admin ของ SchoolOS โดยตรง
+ * ครูที่ SchoolOS ตั้งเป็น teacher-admin ล็อกอินเข้ามาเป็น admin ได้ทันที
+ *
+ * สคริปต์นี้จึงไม่ถูกเรียกจาก entrypoint และผูกไว้กับ compose profile "seed"
+ * (docker compose --profile seed run --rm seed) เพื่อไม่ให้รันเองตอน deploy
+ *
+ * รหัสผ่านมาจาก env เท่านั้น — ไม่มีค่า default ในไฟล์นี้ ตั้งใจให้ล้มถ้าไม่ได้ตั้ง
+ *   SEED_ADMIN_USERNAME (ไม่ตั้ง = "admin")
+ *   SEED_ADMIN_PASSWORD (บังคับ)
  */
-require('dotenv').config({ override: true });
+require('./config/env');
 const db = require('./config/db');
 const bcrypt = require('bcryptjs');
 
 async function seed() {
-  const username = 'admin';
-  const password = 'admin1234';
-  const role = 'admin';
+  const username = process.env.SEED_ADMIN_USERNAME || 'admin';
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  const name = process.env.SEED_ADMIN_NAME || 'ผู้ดูแลระบบ (local)';
 
-  try {
-    // สร้าง table ถ้ายังไม่มี
-    await db.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-        username    VARCHAR(100) NOT NULL UNIQUE,
-        password    VARCHAR(255) NOT NULL,
-        role        ENUM('admin','student') NOT NULL DEFAULT 'student',
-        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
-
-    const hash = await bcrypt.hash(password, 10);
-
-    // ถ้ามี username นี้อยู่แล้ว → อัปเดต password
-    const [existing] = await db.query('SELECT id FROM users WHERE username = ?', [username]);
-    if (existing.length > 0) {
-      await db.query('UPDATE users SET password = ?, role = ? WHERE username = ?', [hash, role, username]);
-      console.log(`✅ อัปเดต password ของ "${username}" สำเร็จ`);
-    } else {
-      await db.query('INSERT INTO users (username, password, role) VALUES (?, ?, ?)', [username, hash, role]);
-      console.log(`✅ สร้าง user "${username}" สำเร็จ`);
-    }
-
-    console.log(`\n👤 username : ${username}`);
-    console.log(`🔑 password : ${password}`);
-    console.log(`\nเข้าสู่ระบบแล้วเปลี่ยน password ในหน้า Account ได้เลย`);
-  } catch (err) {
-    console.error('❌ Seed ล้มเหลว:', err.message);
-  } finally {
-    process.exit(0);
+  if (!password) {
+    console.error('❌ ต้องตั้ง SEED_ADMIN_PASSWORD ก่อน — สคริปต์นี้ไม่มีรหัสผ่านสำรองให้');
+    process.exit(1);
   }
+  if (password.length < 8) {
+    console.error('❌ SEED_ADMIN_PASSWORD สั้นเกินไป (อย่างน้อย 8 ตัวอักษร)');
+    process.exit(1);
+  }
+
+  const hash = await bcrypt.hash(password, 10);
+
+  // idempotent: มีอยู่แล้ว = อัปเดตรหัสผ่าน, ยังไม่มี = สร้างใหม่
+  await db.query(
+    `INSERT INTO users (username, password, name, role)
+     VALUES (?, ?, ?, 'admin')
+     ON CONFLICT (username) DO UPDATE
+       SET password = EXCLUDED.password, name = EXCLUDED.name, role = 'admin'`,
+    [username, hash, name]
+  );
+
+  console.log(`✅ ตั้งบัญชี admin local "${username}" เรียบร้อย`);
+  console.log('   (รหัสผ่านมาจาก SEED_ADMIN_PASSWORD — ไม่แสดงในล็อก)');
 }
 
-seed();
+seed()
+  .then(() => db.pool.end())
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error('❌ Seed ล้มเหลว:', err.message);
+    process.exit(1);
+  });

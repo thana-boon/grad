@@ -91,7 +91,10 @@ router.post('/sync-wiki', verifyToken, adminOnly, async (req, res) => {
           const key = `${uni.id}::${name}`;
           if (existingSet.has(key)) continue;
           existingSet.add(key);
-          await db.query('INSERT IGNORE INTO `faculties` (university_id, name_th) VALUES (?, ?)', [uni.id, name]);
+          await db.query(
+            'INSERT INTO `faculties` (university_id, name_th) VALUES (?, ?) ON CONFLICT (university_id, name_th) DO NOTHING',
+            [uni.id, name]
+          );
           added++;
         }
         processed++;
@@ -183,8 +186,10 @@ router.post('/sync-programs', verifyToken, adminOnly, async (req, res) => {
           const key = `${fac.faculty_id}::${name}`;
           if (existingSet.has(key)) continue;
           existingSet.add(key);
+          // programs ไม่มี unique key บน (faculty_id, program_name_th) โดยตั้งใจ
+          // (ชื่อหลักสูตรซ้ำได้ข้ามวิทยาเขต/ประเภท) — กันซ้ำด้วย existingSet ด้านบนแทน
           await db.query(
-            'INSERT IGNORE INTO `programs` (faculty_id, program_name_th) VALUES (?, ?)',
+            'INSERT INTO `programs` (faculty_id, program_name_th) VALUES (?, ?)',
             [fac.faculty_id, name]
           );
           added++;

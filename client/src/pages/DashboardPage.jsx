@@ -13,9 +13,11 @@ import ReportPage from './admin/ReportPage';
 import AdmissionTableReportPage from './admin/AdmissionTableReportPage';
 import ActivityLogPage from './admin/ActivityLogPage';
 
+// adminOnly = เมนูที่ครู read-only ไม่ควรเห็นเลย (API ฝั่งนั้นเป็น adminOnly อยู่แล้ว
+// กดไปก็ได้ 403 กลับมา — ซ่อนตั้งแต่แรกดีกว่าให้เจอหน้าพัง)
 const ADMIN_MENU = [
   { label: 'dashboard', path: '/dashboard', icon: '🏠' },
-  { label: 'จัดการ account', path: '/admin/accounts', icon: '👥' },
+  { label: 'จัดการ account', path: '/admin/accounts', icon: '👥', adminOnly: true },
   { label: 'ปีการศึกษา', path: '/admin/academic-years', icon: '📅' },
   { label: 'รายชื่อนักเรียน', path: '/admin/students', icon: '🎓' },
   { label: 'มหาวิทยาลัย', path: '/admin/universities', icon: '🏛️' },
@@ -31,13 +33,17 @@ export default function DashboardPage({ activePage }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  // ครูจาก SchoolOS ที่ไม่ได้เป็น teacher-admin → เข้าหลังบ้านได้แต่แก้อะไรไม่ได้
+  const isStaff = user?.role === 'admin' || user?.role === 'teacher';
+  const isReadOnly = user?.role === 'teacher';
+
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
   const renderContent = () => {
-    if (user?.role !== 'admin') return <StudentDashboard />;
+    if (!isStaff) return <StudentDashboard />;
     if (activePage === 'accounts') return <AccountsPage />;
     if (activePage === 'academic-years') return <AcademicYearsPage />;
     if (activePage === 'students') return <StudentsPage />;
@@ -69,8 +75,8 @@ export default function DashboardPage({ activePage }) {
           <span className="text-xs hidden sm:block text-base-content/60">
             สวัสดี 👋 <span className="font-medium text-base-content">{user?.name || user?.username}</span>
           </span>
-          <div className="badge badge-primary badge-sm">
-            {user?.role === 'admin' ? '🔧 admin' : '🎓 student'}
+          <div className={`badge badge-sm ${isReadOnly ? 'badge-ghost' : 'badge-primary'}`}>
+            {user?.role === 'admin' ? '🔧 admin' : isReadOnly ? '👀 ครู (ดูอย่างเดียว)' : '🎓 student'}
           </div>
           <button onClick={handleLogout} className="btn btn-ghost btn-sm text-error">
             ออกจากระบบ
@@ -79,11 +85,11 @@ export default function DashboardPage({ activePage }) {
       </div>
 
       <div className="flex">
-        {/* Sidebar (admin เท่านั้น) */}
-        {user?.role === 'admin' && (
+        {/* Sidebar (admin + ครู read-only) */}
+        {isStaff && (
           <aside className="w-56 min-h-screen bg-base-100 shadow-sm hidden md:block">
             <ul className="menu p-3 gap-1">
-              {ADMIN_MENU.map((item) => (
+              {ADMIN_MENU.filter((item) => !(item.adminOnly && isReadOnly)).map((item) => (
                 <li key={item.path}>
                   <NavLink
                     to={item.path}
@@ -103,6 +109,14 @@ export default function DashboardPage({ activePage }) {
 
         {/* Main content */}
         <main className="flex-1 min-w-0 overflow-x-auto p-6">
+          {isReadOnly && (
+            <div role="alert" className="alert alert-info mb-4 py-2">
+              <span className="text-sm">
+                👀 <span className="font-medium">โหมดดูอย่างเดียว</span> — บัญชีครูเปิดดูข้อมูลได้ทุกหน้า
+                แต่บันทึก/แก้ไข/ลบไม่ได้ (ต้องเป็นผู้ดูแลระบบที่ SchoolOS)
+              </span>
+            </div>
+          )}
           {renderContent()}
         </main>
       </div>

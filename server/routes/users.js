@@ -55,8 +55,9 @@ router.post('/', async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
+    // RETURNING id — Postgres ไม่มี LAST_INSERT_ID() ให้เดาเหมือน MySQL
     const [result] = await db.query(
-      'INSERT INTO users (username, password, name, role, email) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO users (username, password, name, role, email) VALUES (?, ?, ?, ?, ?) RETURNING id',
       [username, hashed, name, role, email || null]
     );
 
@@ -116,8 +117,9 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
-  // ห้ามลบตัวเอง
-  if (parseInt(id) === req.user.id) {
+  // ห้ามลบตัวเอง — เช็คเฉพาะคนที่ล็อกอินด้วยบัญชี local เท่านั้น
+  // (ผู้ดูแลที่มาจาก SchoolOS ถือ id ของฝั่ง SchoolOS ซึ่งอาจไปชนกับ users.id ของคนอื่นพอดี)
+  if (req.user.source === 'local' && parseInt(id) === req.user.id) {
     return res.status(400).json({ message: 'ไม่สามารถลบ account ตัวเองได้' });
   }
 

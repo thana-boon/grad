@@ -185,7 +185,7 @@ router.post('/', verifyToken, adminOnly, async (req, res) => {
   try {
     const [result] = await db.query(
       `INSERT INTO \`programs\` (university_id, campus, faculty_name, group_field, field_name_th, program_name_th, program_type)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       [Number(university_id), campus?.trim() || null, faculty_name?.trim() || null,
        group_field?.trim() || null, field_name_th?.trim() || null,
        program_name_th.trim(), program_type?.trim() || null]

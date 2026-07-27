@@ -4,6 +4,7 @@ import { domToCanvas } from 'modern-screenshot';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import api from '../../utils/api';
+import { absoluteBase } from '../../utils/withBase';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
 import SearchableSelect from '../../components/SearchableSelect';
 
@@ -790,7 +791,7 @@ export default function ReportPage() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<base href="${window.location.origin}/">
+<base href="${absoluteBase()}">
 <title>${title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -1,67 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
-const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
+const { verifyToken, adminOnly, staffRead } = require('../middlewares/authMiddleware');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// ─── Auto-create table ─────────────────────────────────────────────────────────
-async function ensureTable() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS report_settings (
-      id INT NOT NULL DEFAULT 1,
-      congrats_text TEXT,
-      show_quote TINYINT(1) NOT NULL DEFAULT 1,
-      background_image_url VARCHAR(500) DEFAULT NULL,
-      school_name VARCHAR(255) DEFAULT NULL,
-      school_logo_url VARCHAR(500) DEFAULT NULL,
-      PRIMARY KEY (id)
-    )
-  `);
-  await db.query(`
-    INSERT IGNORE INTO report_settings (id, congrats_text, show_quote)
-    VALUES (1, 'ขอแสดงความยินดีกับความสำเร็จของน้องๆ ทุกคน', 1)
-  `);
-  // migrate existing table
-  for (const col of [
-    "ALTER TABLE report_settings ADD COLUMN school_name VARCHAR(255) DEFAULT NULL",
-    "ALTER TABLE report_settings ADD COLUMN school_logo_url VARCHAR(500) DEFAULT NULL",
-    "ALTER TABLE report_settings ADD COLUMN text_color VARCHAR(20) DEFAULT '#ffffff'",
-    "ALTER TABLE report_settings ADD COLUMN show_photo_frame TINYINT(1) NOT NULL DEFAULT 1",
-    "ALTER TABLE report_settings ADD COLUMN photo_scale INT NOT NULL DEFAULT 100",
-    "ALTER TABLE report_settings ADD COLUMN photo_overflow TINYINT(1) NOT NULL DEFAULT 0",
-    "ALTER TABLE report_settings ADD COLUMN photo_offset_y INT NOT NULL DEFAULT 0",
-    "ALTER TABLE report_settings ADD COLUMN name_bg_color VARCHAR(20) DEFAULT '#000000'",
-    "ALTER TABLE report_settings ADD COLUMN name_bg_opacity INT NOT NULL DEFAULT 0",
-    "ALTER TABLE report_settings ADD COLUMN info_offset_y INT NOT NULL DEFAULT 0",
-    "ALTER TABLE report_settings ADD COLUMN confirm_color VARCHAR(20) DEFAULT '#22c55e'",
-    "ALTER TABLE report_settings ADD COLUMN confirm_opacity INT NOT NULL DEFAULT 22",
-    // layout_json = พิกัด/ขนาดของแต่ละชิ้น (โลโก้/ชื่อ ร.ร./ข้อความ/รูป/ชื่อ นร.) แบบลากวางอิสระ
-    "ALTER TABLE report_settings ADD COLUMN layout_json TEXT DEFAULT NULL",
-  ]) {
-    await db.query(col).catch(() => {});
-  }
-}
-ensureTable();
-
-// ─── Auto-create per-student override table ───────────────────────────────────
-// คอลัมน์เป็น NULL ได้ = ให้ใช้ค่ากลางจาก report_settings
-async function ensureStudentTable() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS report_student_settings (
-      student_code VARCHAR(50) NOT NULL,
-      photo_scale INT DEFAULT NULL,
-      photo_offset_y INT DEFAULT NULL,
-      photo_overflow TINYINT(1) DEFAULT NULL,
-      info_offset_y INT DEFAULT NULL,
-      PRIMARY KEY (student_code)
-    )
-  `);
-  // layout_json = ตำแหน่ง/ขนาดเฉพาะคน (partial — เก็บเฉพาะชิ้นที่ต่างจากค่ากลาง)
-  await db.query('ALTER TABLE report_student_settings ADD COLUMN layout_json TEXT DEFAULT NULL').catch(() => {});
-}
-ensureStudentTable();
+// report_settings / report_student_settings สร้างโดย migration ตอนสตาร์ท
+// (database/postgres/001_init.sql) — รวมถึงแถวค่าเริ่มต้น id = 1
 
 // รหัสนักเรียนบางที่ pad 0 นำหน้า บางที่ไม่ pad — normalize ให้ตรงกันเสมอ
 const normCode = (c) => {
@@ -125,7 +71,7 @@ const uploadBgMW  = multer({ storage: makeStorage('report-bg',   'bg'),   limits
 const uploadLogoMW = multer({ storage: makeStorage('report-logo', 'logo'), limits: { fileSize: 5  * 1024 * 1024 }, fileFilter: imageFilter });
 
 // ─── GET /api/report-settings ──────────────────────────────────────────────────
-router.get('/', verifyToken, adminOnly, async (req, res) => {
+router.get('/', verifyToken, staffRead, async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM report_settings WHERE id = 1');
     res.json(rows[0] || {});
@@ -158,7 +104,7 @@ router.put('/', verifyToken, adminOnly, async (req, res) => {
 
 // ─── GET /api/report-settings/students ────────────────────────────────────────
 // คืน object: { [student_code]: { photo_scale, photo_offset_y, ... } }
-router.get('/students', verifyToken, adminOnly, async (req, res) => {
+router.get('/students', verifyToken, staffRead, async (req, res) => {
   try {
     const [rows] = await db.query('SELECT * FROM report_student_settings');
     const map = {};
@@ -187,9 +133,12 @@ router.put('/students/:code', verifyToken, adminOnly, async (req, res) => {
     await db.query(
       `INSERT INTO report_student_settings (student_code, photo_scale, photo_offset_y, photo_overflow, info_offset_y, layout_json)
        VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE photo_scale = VALUES(photo_scale), photo_offset_y = VALUES(photo_offset_y),
-                               photo_overflow = VALUES(photo_overflow), info_offset_y = VALUES(info_offset_y),
-                               layout_json = VALUES(layout_json)`,
+       ON CONFLICT (student_code) DO UPDATE
+         SET photo_scale    = EXCLUDED.photo_scale,
+             photo_offset_y = EXCLUDED.photo_offset_y,
+             photo_overflow = EXCLUDED.photo_overflow,
+             info_offset_y  = EXCLUDED.info_offset_y,
+             layout_json    = EXCLUDED.layout_json`,
       [code, scale, offsetY, overflow, infoY, layout]
     );
     res.json({ ok: true });

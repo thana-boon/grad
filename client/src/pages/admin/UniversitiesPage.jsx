@@ -183,6 +183,24 @@ export default function UniversitiesPage() {
     finally { setDeleting(false); }
   };
 
+  // ─── ดาวน์โหลดไฟล์ตัวอย่าง ────────────────────────────────────────────────
+  // ต้องยิงผ่าน api (axios) ไม่ใช่ <a href download> เพราะ endpoint นี้ต้องใช้ JWT
+  // ซึ่ง <a> ไม่ได้แนบ header ไปด้วย (ที่ผ่านมาจึงได้ 401 กลับมาเป็นไฟล์)
+  // ผลพลอยได้: baseURL ของ api พา prefix /gradtrack ไปให้เอง ไม่ต้อง hardcode path
+  const downloadSample = async () => {
+    try {
+      const res = await api.get('/universities/sample-excel', { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'university_import_sample.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('ดาวน์โหลดไฟล์ตัวอย่างไม่สำเร็จ', 'error');
+    }
+  };
+
   // ─── Import Excel ─────────────────────────────────────────────────────────
   const handleImportExcel = (e) => {
     const file = e.target.files[0];
@@ -250,13 +268,13 @@ export default function UniversitiesPage() {
             {importing ? <span className="loading loading-spinner loading-xs" /> : '📥'}
             Import Excel
           </button>
-          <a
-            href="/api/universities/sample-excel"
-            download
+          <button
+            type="button"
+            onClick={downloadSample}
             className="btn btn-ghost btn-sm gap-1 text-base-content/60"
           >
             📋 ตัวอย่าง Excel
-          </a>
+          </button>
 
           {/* Divider */}
           <div className="w-px h-6 bg-base-300" />

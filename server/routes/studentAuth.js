@@ -5,8 +5,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const db = require('../config/db');
-const studentApi = require('../config/studentApi');
-const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
+const schoolos = require('../config/schoolos');
+const { verifyToken, adminOnly, staffRead } = require('../middlewares/authMiddleware');
 const { loginLimiter } = require('../middlewares/rateLimiter');
 const logger = require('../config/logger');
 const { logActivity } = require('./activityLogs');
@@ -18,49 +18,11 @@ const normCode = (c) => {
   return Number.isNaN(n) ? String(c ?? '') : String(n);
 };
 
-// ─── Auto-create tables ───────────────────────────────────────────────────────
-const ensureProfileTable = async () => {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS \`student_profiles\` (
-      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
-      \`student_code\` VARCHAR(20) NOT NULL UNIQUE,
-      \`year_id\` INT NOT NULL,
-      \`quote\` TEXT,
-      \`photo_url\` VARCHAR(500),
-      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
-};
+// student_profiles / student_admissions สร้างโดย migration ตอนสตาร์ท
+// (database/postgres/001_init.sql) — ไม่มี ensureTable() ที่ยิง DDL จาก request path แล้ว
 
-const ensureAdmissionTable = async () => {
-  // สร้าง table ถ้ายังไม่มี
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS \`student_admissions\` (
-      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
-      \`student_code\` VARCHAR(20) NOT NULL,
-      \`university_id\` INT NOT NULL,
-      \`program_id\` INT NOT NULL,
-      \`confirmed\` TINYINT(1) NOT NULL DEFAULT 0,
-      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      \`updated_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY \`uq_student_program\` (\`student_code\`, \`program_id\`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  `);
-  // Migration: เพิ่ม/ปรับ columns
-  const [cols] = await db.query(`
-    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'student_admissions'
-  `);
-  const colNames = cols.map(c => c.COLUMN_NAME);
-  if (colNames.includes('faculty_id')) {
-    // ลบ unique key เก่าที่มี faculty_id
-    try { await db.query(`ALTER TABLE student_admissions DROP INDEX uq_student_program`); } catch {}
-    try { await db.query(`ALTER TABLE student_admissions DROP INDEX uq_student_admission`); } catch {}
-    try { await db.query(`ALTER TABLE student_admissions DROP COLUMN faculty_id`); } catch {}
-    try { await db.query(`ALTER TABLE student_admissions ADD UNIQUE KEY uq_student_program (student_code, program_id)`); } catch {}
-  }
-};
+// Postgres คืน SQLSTATE 23505 เมื่อชน unique constraint (เทียบเท่า ER_DUP_ENTRY ของ MySQL)
+const isDuplicate = (err) => err.code === '23505';
 
 // ─── Multer: Excel import (memory storage) ──────────────────────────────────
 const excelUpload = multer({
@@ -123,16 +85,13 @@ function studentOnly(req, res, next) {
 // ─── GET /api/student/admin/admission-overview ────────────────────────────────
 // สรุปสถานะ admission ของนักเรียนทั้งหมด (admin only)
 // query: year_id (required)
-router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res) => {
+router.get('/admin/admission-overview', verifyToken, staffRead, async (req, res) => {
   const { year_id } = req.query;
   if (!year_id) return res.status(400).json({ message: 'year_id required' });
 
   try {
-    await ensureAdmissionTable();
-    await ensureProfileTable(); // ป้องกัน JOIN พัง ถ้าตารางยังไม่ถูกสร้าง
-
     // ดึงนักเรียน ม.6 ทั้งหมดในปีนั้นจาก Student API (กรองชั้นฝั่ง API)
-    const { data: apiStudents } = await studentApi.listAllStudents({ year_id, class_level: 'ม.6' });
+    const { data: apiStudents } = await schoolos.listAllStudents({ year_id, class_level: 'ม.6' });
     const m6 = (apiStudents || [])
       .filter((s) => /^ม\.?\s?6/.test(String(s.class_level || '').trim()))
       .sort((a, b) => (a.class_room - b.class_room) || (a.number_in_room - b.number_in_room));
@@ -155,12 +114,14 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
     }));
 
     // ดึง admissions ทั้งหมดของนักเรียนเหล่านี้ พร้อมชื่อ มหาลัย/คณะ/สาขา
-    // ใส่ทั้งรหัสแบบ pad และแบบตัด 0 ใน IN() เพื่อให้ match ข้อมูลเก่าที่ไม่ได้ pad
+    // ใส่ทั้งรหัสแบบ pad และแบบตัด 0 เพื่อให้ match ข้อมูลเก่าที่ไม่ได้ pad
     const codeSet = new Set();
     for (const s of students) { codeSet.add(s.student_code); codeSet.add(normCode(s.student_code)); }
     const codes = [...codeSet];
     let admissionMap = {};
     if (codes.length > 0) {
+      // MySQL กาง `IN (?)` จาก array ให้เอง แต่ Postgres ไม่ทำ —
+      // ใช้ `= ANY(?)` ซึ่งรับ array ทั้งก้อนเป็นพารามิเตอร์เดียวได้ตรง ๆ
       const [admissions] = await db.query(
         `SELECT sa.student_code, sa.id, sa.university_id, sa.program_id, sa.confirmed, sa.created_at,
                 u.name_th AS university_name, u.logo_url,
@@ -169,7 +130,7 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
          FROM student_admissions sa
          JOIN universities u ON u.id = sa.university_id
          JOIN programs p ON p.id = sa.program_id
-         WHERE sa.student_code IN (?)
+         WHERE sa.student_code = ANY(?)
          ORDER BY sa.confirmed DESC, sa.created_at ASC`,
         [codes]
       );
@@ -194,59 +155,83 @@ router.get('/admin/admission-overview', verifyToken, adminOnly, async (req, res)
   }
 });
 
-// ─── GET /api/student/login ──────────────────────────────────────────────────
-// username = student_code padded to 5 digits
-// password = "Skdw" + citizen_id
+// ─── POST /api/student/login ─────────────────────────────────────────────────
+// username = รหัสนักเรียน (pad 5 หลัก)
+//
+// ตรวจรหัสผ่าน 2 ทาง เรียงตามลำดับ:
+//   1. SchoolOS /auth/verify — รหัสผ่าน SchoolOS ของนักเรียนเอง (ทางหลัก)
+//   2. legacy "Skdw" + เลขบัตรประชาชน — ของเดิมก่อนย้ายมา SchoolOS
+//
+// ทาง legacy ต้องใช้ scope students:pii และรหัสผ่านที่เดาได้จากเลขบัตร ปชช.
+// (ใครรู้เลขบัตรของนักเรียนก็ล็อกอินแทนได้) จึงปิดได้ด้วย STUDENT_LEGACY_LOGIN=0
+// เมื่อนักเรียนย้ายไปใช้รหัสผ่าน SchoolOS กันครบแล้ว
+const LEGACY_LOGIN_ENABLED = process.env.STUDENT_LEGACY_LOGIN !== '0';
+
 router.post('/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ message: 'กรุณากรอก username และ password' });
   }
 
+  const paddedCode = String(username).trim();
+
   try {
-    // ค้นหาจาก Student API (getStudentByCode รองรับทั้งรหัส pad และตัดศูนย์นำหน้า)
-    const paddedCode = username.trim();
-    const student = await studentApi.getStudentByCode(paddedCode);
+    let student = null;
+    let via = null;
+
+    // ── 1) รหัสผ่าน SchoolOS ──────────────────────────────────────────────────
+    const sosUser = await schoolos.verify('student', paddedCode, password);
+    if (sosUser) {
+      if (!sosUser.active) {
+        // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออกแล้วด้วย — ต้องกันเอง
+        logger.warn('Student login blocked: inactive', { username: paddedCode, status: sosUser.status });
+        return res.status(403).json({ message: 'บัญชีนี้ไม่ได้อยู่ในสถานะกำลังศึกษา' });
+      }
+      student = await schoolos.getStudentByCode(sosUser.code || paddedCode);
+      via = 'schoolos';
+    }
+
+    // ── 2) legacy: Skdw + เลขบัตรประชาชน ─────────────────────────────────────
+    if (!student && LEGACY_LOGIN_ENABLED) {
+      const found = await schoolos.getStudentByCode(paddedCode);
+      // ต้องมี citizen_id จริง (key มี scope students:pii) ถึงจะเทียบได้
+      // ถ้า scope ปิดอยู่ citizen_id เป็น undefined → ห้ามยอมให้ผ่านด้วยคำว่า "Skdw" เปล่า ๆ
+      if (found?.citizen_id && password === `Skdw${found.citizen_id}`) {
+        student = found;
+        via = 'legacy';
+      }
+    }
 
     if (!student) {
-      logger.warn('Student login failed: not found', { username, ip: req.ip });
-      return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
-    }
-    const expectedPassword = student.citizen_id ? `Skdw${student.citizen_id}` : 'Skdw';
-
-    if (password !== expectedPassword) {
-      logger.warn('Student login failed: wrong password', { username, ip: req.ip });
+      logger.warn('Student login failed', { username: paddedCode, ip: req.ip });
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    await ensureProfileTable();
-
-    // หรือสร้าง profile ถ้ายังไม่มี
-    const [profileRows] = await db.query(
-      'SELECT * FROM student_profiles WHERE student_code = ?',
+    // สร้าง profile ถ้ายังไม่มี (ON CONFLICT กันกรณีล็อกอินซ้อนกันสองแท็บ)
+    await db.query(
+      `INSERT INTO student_profiles (student_code, year_id) VALUES (?, 0)
+       ON CONFLICT (student_code) DO NOTHING`,
       [student.student_code]
     );
-    let profile = profileRows[0] || null;
-    if (!profile) {
-      await db.query(
-        'INSERT INTO student_profiles (student_code, year_id) VALUES (?, 0)',
-        [student.student_code]
-      );
-      const [newProfile] = await db.query(
-        'SELECT * FROM student_profiles WHERE student_code = ?',
-        [student.student_code]
-      );
-      profile = newProfile[0];
-    }
-
-    const token = jwt.sign(
-      { student_code: student.student_code, role: 'student' },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
+    const [[profile]] = await db.query(
+      'SELECT quote, photo_url FROM student_profiles WHERE student_code = ?',
+      [student.student_code]
     );
 
-    logger.info('Student login success', { student_code: student.student_code, ip: req.ip });
-    logActivity({ username: paddedCode, name: `${student.first_name} ${student.last_name}`, role: 'student', action: 'login', target: '', detail: null });
+    const token = jwt.sign(
+      { student_code: student.student_code, username: paddedCode, role: 'student' },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    );
+
+    logger.info('Student login success', { student_code: student.student_code, via, ip: req.ip });
+    logActivity({
+      username: paddedCode,
+      name: `${student.first_name} ${student.last_name}`,
+      role: 'student',
+      action: 'login',
+      target: via,
+    });
 
     res.json({
       token,
@@ -264,6 +249,20 @@ router.post('/login', loginLimiter, async (req, res) => {
       },
     });
   } catch (err) {
+    // key มีปัญหา ≠ ผู้ใช้กรอกผิด — ต้องแยกให้ชัด ไม่งั้นไล่หาสาเหตุไม่เจอ
+    if (err instanceof schoolos.SosKeyError) {
+      logger.error('SchoolOS API key ใช้ไม่ได้ (student login)', { code: err.code });
+      return res.status(503).json({
+        message: 'ระบบเชื่อมต่อ SchoolOS ไม่ได้ (API key มีปัญหา) กรุณาแจ้งผู้ดูแลระบบ',
+      });
+    }
+    if (err instanceof schoolos.SosRateLimitError) {
+      return res.status(429).json({
+        message: 'พยายามเข้าสู่ระบบเกินกำหนด กรุณารอสักครู่แล้วลองใหม่',
+        retryAfterSeconds: err.retryAfterSeconds,
+      });
+    }
+
     logger.error('Student login error', { error: err.message });
     res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
@@ -272,10 +271,9 @@ router.post('/login', loginLimiter, async (req, res) => {
 // ─── GET /api/student/profile ─────────────────────────────────────────────────
 router.get('/profile', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureProfileTable();
     const code = req.user.student_code;
 
-    const student = await studentApi.getStudentByCode(code);
+    const student = await schoolos.getStudentByCode(code);
     if (!student) return res.status(404).json({ message: 'ไม่พบข้อมูลนักเรียน' });
 
     const [[profile]] = await db.query(
@@ -302,12 +300,12 @@ router.get('/profile', verifyToken, studentOnly, async (req, res) => {
 // ─── PUT /api/student/profile/quote ──────────────────────────────────────────
 router.put('/profile/quote', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureProfileTable();
     const { quote } = req.body;
     const code = req.user.student_code;
     await db.query(
-      'INSERT INTO student_profiles (student_code, year_id, quote) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE quote = ?',
-      [code, quote || '', quote || '']
+      `INSERT INTO student_profiles (student_code, year_id, quote) VALUES (?, 0, ?)
+       ON CONFLICT (student_code) DO UPDATE SET quote = EXCLUDED.quote`,
+      [code, quote || '']
     );
     res.json({ quote: quote || '' });
   } catch (err) {
@@ -322,7 +320,6 @@ router.post('/profile/photo', verifyToken, studentOnly, (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูปภาพ' });
 
     try {
-      await ensureProfileTable();
       const code = req.user.student_code;
       const photoUrl = `/uploads/student-photos/${req.file.filename}`;
 
@@ -336,8 +333,9 @@ router.post('/profile/photo', verifyToken, studentOnly, (req, res) => {
       }
 
       await db.query(
-        'INSERT INTO student_profiles (student_code, year_id, photo_url) VALUES (?, 0, ?) ON DUPLICATE KEY UPDATE photo_url = ?',
-        [code, photoUrl, photoUrl]
+        `INSERT INTO student_profiles (student_code, year_id, photo_url) VALUES (?, 0, ?)
+         ON CONFLICT (student_code) DO UPDATE SET photo_url = EXCLUDED.photo_url`,
+        [code, photoUrl]
       );
       res.json({ photo_url: photoUrl });
     } catch (err2) {
@@ -350,7 +348,6 @@ router.post('/profile/photo', verifyToken, studentOnly, (req, res) => {
 // นักเรียนลบรูปของตัวเอง
 router.delete('/profile/photo', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureProfileTable();
     const code = req.user.student_code;
     const [[old]] = await db.query(
       'SELECT photo_url FROM student_profiles WHERE student_code = ?', [code]
@@ -376,7 +373,6 @@ router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req,
     if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูปภาพ' });
 
     try {
-      await ensureProfileTable();
       const code = String(req.params.student_code || '').trim();
       if (!code) return res.status(400).json({ message: 'ไม่พบรหัสนักเรียน' });
 
@@ -401,7 +397,8 @@ router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req,
       await db.query(
         `INSERT INTO student_profiles (student_code, year_id, photo_url)
          VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE year_id = VALUES(year_id), photo_url = VALUES(photo_url), updated_at = NOW()`,
+         ON CONFLICT (student_code) DO UPDATE
+           SET year_id = EXCLUDED.year_id, photo_url = EXCLUDED.photo_url`,
         [code, yearId, photoUrl]
       );
 
@@ -416,7 +413,6 @@ router.post('/admin/students/:student_code/photo', verifyToken, adminOnly, (req,
 // Admin: ลบรูปนักเรียน
 router.delete('/admin/students/:student_code/photo', verifyToken, adminOnly, async (req, res) => {
   try {
-    await ensureProfileTable();
     const code = String(req.params.student_code || '').trim();
     if (!code) return res.status(400).json({ message: 'ไม่พบรหัสนักเรียน' });
 
@@ -440,7 +436,6 @@ router.delete('/admin/students/:student_code/photo', verifyToken, adminOnly, asy
 // ดึงรายการสอบติดทั้งหมดของนักเรียน
 router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureAdmissionTable();
     const code = req.user.student_code;
     // เทียบทั้งรหัสแบบ pad และแบบตัด 0 เพื่อให้เห็นข้อมูลเก่าที่เก็บแบบไม่ pad
     const [rows] = await db.query(
@@ -466,7 +461,6 @@ router.get('/admissions', verifyToken, studentOnly, async (req, res) => {
 // เพิ่มมหาวิทยาลัยที่สอบติด
 router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureAdmissionTable();
     const code = req.user.student_code;
     const { program_id } = req.body;
     if (!program_id) {
@@ -493,7 +487,7 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
     logActivity({ username: code, name: '', role: 'student', action: 'add_admission', target: uniRow?.name || String(university_id), detail: { university_id, program_id } });
     res.json({ message: 'เพิ่มแล้ว' });
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') {
+    if (isDuplicate(err)) {
       return res.status(400).json({ message: 'มีรายการนี้อยู่แล้ว' });
     }
     res.status(500).json({ message: err.message });
@@ -504,7 +498,6 @@ router.post('/admissions', verifyToken, studentOnly, async (req, res) => {
 // ลบรายการสอบติด (ยังไม่ได้ยืนยันเท่านั้น)
 router.delete('/admissions/:id', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureAdmissionTable();
     const code = req.user.student_code;
     const { id } = req.params;
     const [[row]] = await db.query(
@@ -524,7 +517,6 @@ router.delete('/admissions/:id', verifyToken, studentOnly, async (req, res) => {
 // ยืนยันสิทธิ์รายการนี้
 router.post('/admissions/:id/confirm', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureAdmissionTable();
     const code = req.user.student_code;
     const { id } = req.params;
     const [[row]] = await db.query(
@@ -545,7 +537,6 @@ router.post('/admissions/:id/confirm', verifyToken, studentOnly, async (req, res
 // ยกเลิกการยืนยันสิทธิ์
 router.post('/admissions/:id/unconfirm', verifyToken, studentOnly, async (req, res) => {
   try {
-    await ensureAdmissionTable();
     const code = req.user.student_code;
     const { id } = req.params;
     const [[row]] = await db.query(
@@ -565,12 +556,11 @@ router.post('/admissions/:id/unconfirm', verifyToken, studentOnly, async (req, r
 // ─── GET /api/student/admin/students-by-university ───────────────────────────
 // แสดงรายชื่อนักเรียนที่บันทึกผลสอบติดในมหาวิทยาลัยนี้ (กรองตามคณะได้)
 // query: university_id (required), faculty (optional), year_id (optional — ใช้ resolve ชื่อ)
-router.get('/admin/students-by-university', verifyToken, adminOnly, async (req, res) => {
+router.get('/admin/students-by-university', verifyToken, staffRead, async (req, res) => {
   const { university_id, faculty, year_id } = req.query;
   if (!university_id) return res.status(400).json({ message: 'ต้องระบุ university_id' });
 
   try {
-    await ensureAdmissionTable();
 
     const params = [Number(university_id)];
     let facClause = '';
@@ -618,7 +608,7 @@ router.get('/admin/students-by-university', verifyToken, adminOnly, async (req, 
 
     if (activeYearId) {
       try {
-        const { data } = await studentApi.listAllStudents({ year_id: activeYearId });
+        const { data } = await schoolos.listAllStudents({ year_id: activeYearId });
         for (const s of (data || [])) setInfo(s);
       } catch { /* API ล่ม → แสดงเฉพาะรหัส */ }
     }
@@ -635,7 +625,7 @@ router.get('/admin/students-by-university', verifyToken, adminOnly, async (req, 
       for (let i = 0; i < missing.length; i += CONCURRENCY) {
         await Promise.all(missing.slice(i, i + CONCURRENCY).map(async (code) => {
           try {
-            const s = await studentApi.getStudentByCode(code);
+            const s = await schoolos.getStudentByCode(code);
             if (s) setInfo(s);
           } catch { /* ข้าม */ }
         }));
@@ -659,7 +649,6 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์ Excel' });
 
     try {
-      await ensureAdmissionTable();
 
       // Get active year from settings first, fallback to ปี current ของ Student API
       let activeYearId = null;
@@ -668,7 +657,7 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
       );
       if (setting?.value) activeYearId = Number(setting.value);
       if (!activeYearId) {
-        const { current } = await studentApi.getAcademicYears();
+        const { current } = await schoolos.getAcademicYears();
         if (current) activeYearId = Number(current.id);
       }
       if (!activeYearId) {
@@ -676,7 +665,7 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
       }
 
       // ดึงนักเรียนทั้งปีจาก Student API ครั้งเดียว แล้วทำ Map ไว้ตรวจสอบ (เลี่ยงยิง API รายแถว)
-      const { data: yearStudents } = await studentApi.listAllStudents({ year_id: activeYearId });
+      const { data: yearStudents } = await schoolos.listAllStudents({ year_id: activeYearId });
       const studentMap = new Map();
       for (const s of (yearStudents || [])) {
         studentMap.set(String(s.student_code), s);
@@ -857,14 +846,14 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
             await db.query(
               `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed, created_at)
                VALUES (?, ?, ?, ?, ?)
-               ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+               ON CONFLICT (student_code, program_id) DO UPDATE SET confirmed = EXCLUDED.confirmed`,
               [studentCode, universityId, programId, confirmed, createdAt]
             );
           } else {
             await db.query(
               `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
                VALUES (?, ?, ?, ?)
-               ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+               ON CONFLICT (student_code, program_id) DO UPDATE SET confirmed = EXCLUDED.confirmed`,
               [studentCode, universityId, programId, confirmed]
             );
           }
@@ -894,7 +883,6 @@ router.post('/admin/force-import-admissions', verifyToken, adminOnly, async (req
     return res.status(400).json({ message: 'ไม่มีรายการให้บันทึก' });
   }
   try {
-    await ensureAdmissionTable();
     let saved = 0;
     const errors = [];
 
@@ -912,7 +900,7 @@ router.post('/admin/force-import-admissions', verifyToken, adminOnly, async (req
         if (uni) {
           universityId = uni.id;
         } else {
-          const [result] = await db.query('INSERT INTO universities (name_th) VALUES (?)', [university_name]);
+          const [result] = await db.query('INSERT INTO universities (name_th) VALUES (?) RETURNING id', [university_name]);
           universityId = result.insertId;
         }
 
@@ -926,7 +914,7 @@ router.post('/admin/force-import-admissions', verifyToken, adminOnly, async (req
           programId = prog.id;
         } else {
           const [result] = await db.query(
-            'INSERT INTO `programs` (university_id, faculty_name, program_name_th) VALUES (?, ?, ?)',
+            'INSERT INTO `programs` (university_id, faculty_name, program_name_th) VALUES (?, ?, ?) RETURNING id',
             [universityId, faculty_name || null, program_name]
           );
           programId = result.insertId;
@@ -937,14 +925,14 @@ router.post('/admin/force-import-admissions', verifyToken, adminOnly, async (req
           await db.query(
             `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed, created_at)
              VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+             ON CONFLICT (student_code, program_id) DO UPDATE SET confirmed = EXCLUDED.confirmed`,
             [student_code, universityId, programId, confirmed ? 1 : 0, created_at]
           );
         } else {
           await db.query(
             `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
              VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = CURRENT_TIMESTAMP`,
+             ON CONFLICT (student_code, program_id) DO UPDATE SET confirmed = EXCLUDED.confirmed`,
             [student_code, universityId, programId, confirmed ? 1 : 0]
           );
         }
@@ -968,14 +956,14 @@ router.post('/admin/admissions', verifyToken, adminOnly, async (req, res) => {
     return res.status(400).json({ message: 'ต้องระบุ student_code และ program_id' });
   }
   try {
-    await ensureAdmissionTable();
     const [progs] = await db.query('SELECT id, university_id FROM `programs` WHERE id = ?', [Number(program_id)]);
     if (!progs.length) return res.status(404).json({ message: 'ไม่พบหลักสูตรนี้' });
     const university_id = progs[0].university_id;
     const [result] = await db.query(
       `INSERT INTO student_admissions (student_code, university_id, program_id, confirmed)
        VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE confirmed = VALUES(confirmed), updated_at = NOW()`,
+       ON CONFLICT (student_code, program_id) DO UPDATE SET confirmed = EXCLUDED.confirmed
+       RETURNING id`,
       [student_code, university_id, Number(program_id), confirmed ? 1 : 0]
     );
     res.json({ id: result.insertId || null, message: 'เพิ่มข้อมูลสำเร็จ' });
