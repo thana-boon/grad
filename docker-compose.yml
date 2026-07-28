@@ -12,10 +12,14 @@ services:
       context: .
       args:
         # base path ถูก bake ตอน vite build → ต้องส่งเป็น build arg
-        # ไม่ตั้งเลย = /gradtrack (ตรงกับ nginx portal ที่ forward /gradtrack/... มาโดยคง prefix)
+        # ไม่ตั้งเลย = /grad (ตรงกับ nginx portal ที่ forward 192.168.200.56/grad/... มาโดยคง prefix)
         # ตั้ง BASE_PATH= (ค่าว่าง) = เสิร์ฟที่ root — ใช้ตอนเทสในเครื่อง
         # ใช้ ${VAR-default} ไม่ใช่ :- เพื่อให้ค่าว่างที่ตั้งใจตั้งมีผลจริง
-        BASE_PATH: ${BASE_PATH-/gradtrack}
+        #
+        # ⚠️  ค่านี้ถูก bake ลง asset ตอน build → เปลี่ยนแล้วต้อง "build ใหม่" เสมอ
+        #     ถ้า Portainer เอา image gradtrack-app เก่าที่ cache ไว้มาใช้ซ้ำ จะได้ asset
+        #     ที่ bake prefix เดิม → หน้าขึ้นแต่ JS/CSS 404 ทั้งหมด โดยไม่มี error ในล็อกเลย
+        BASE_PATH: ${BASE_PATH-/grad}
     image: gradtrack-app
     container_name: gradtrack-app
     environment:
@@ -24,7 +28,7 @@ services:
       TZ: Asia/Bangkok
       # ต้องเป็นค่าเดียวกับ build arg ข้างบน ไม่งั้น express mount คนละ prefix
       # กับที่ asset ถูก bake ไว้ → หน้าขึ้นแต่ JS/CSS 404
-      BASE_PATH: ${BASE_PATH-/gradtrack}
+      BASE_PATH: ${BASE_PATH-/grad}
 
       # ในเน็ตเวิร์ก school-net เรียก postgres-core ด้วยชื่อ service (พอร์ตภายใน 5432)
       DATABASE_URL: postgres://${GRADUATE_DB_USER:-graduate}:${GRADUATE_DB_PASSWORD:?ต้องตั้ง GRADUATE_DB_PASSWORD ใน Portainer stack env}@${GRADUATE_DB_HOST:-postgres-core}:${GRADUATE_DB_PORT:-5432}/${GRADUATE_DB_NAME:-graduate}

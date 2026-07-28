@@ -25,3 +25,9 @@ Dockerfile    text eol=lf
 *.png   binary
 *.jpg   binary
 *.svg   binary
+
+# ไฟล์ seed ที่บีบอัด (database/seeds/catalog.json.gz)
+# ชื่อลงท้าย .gz ไม่โดน *.json จับ จึงเหลือแค่ `* text=auto` คลุมอยู่ — ปกติ git
+# ตรวจเจอ NUL แล้วถือเป็น binary เอง แต่ประกาศไว้ตรง ๆ ปลอดภัยกว่า เพราะถ้าวันไหน
+# โดน normalize บรรทัด ไฟล์ .gz จะเสียแบบเงียบ ๆ แล้วไปโผล่เป็น seed ล้มตอนสตาร์ท
+*.gz    binary
