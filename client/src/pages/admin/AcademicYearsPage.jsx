@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../utils/api';
+import Icon from '../../components/ui/Icon';
+import { PageHeader, TableWrap, TableSkeleton, EmptyState, Tag, Toast } from '../../components/ui';
 
 export default function AcademicYearsPage() {
   const [years, setYears] = useState([]);
@@ -38,7 +40,7 @@ export default function AcademicYearsPage() {
     try {
       await api.put('/academic-years/active', { year_id: yearId });
       setActiveYearId(yearId);
-      showToast('ตั้งปีการศึกษาสำเร็จ ✅');
+      showToast('ตั้งปีการศึกษาที่ใช้งานแล้ว');
     } catch {
       showToast('ไม่สามารถตั้งปีการศึกษาได้', 'error');
     } finally {
@@ -50,59 +52,53 @@ export default function AcademicYearsPage() {
 
   return (
     <div className="relative">
-      {/* Toast */}
-      {toast && (
-        <div className="toast toast-top toast-end z-50">
-          <div className={`alert alert-${toast.type === 'error' ? 'error' : 'success'} py-2 text-sm`}>
-            {toast.msg}
-          </div>
-        </div>
-      )}
+      <Toast toast={toast} />
 
-      {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold">📅 ปีการศึกษา</h2>
-        <p className="text-xs text-base-content/50">เลือกปีการศึกษาที่ GradTrack ใช้งาน</p>
-      </div>
+      <PageHeader
+        icon="calendar"
+        title="ปีการศึกษา"
+        subtitle="เลือกปีการศึกษาที่ GradTrack ใช้งาน — ทุกหน้าจะอ้างอิงปีนี้เป็นค่าเริ่มต้น"
+      />
 
-      {/* Active Year Banner */}
+      {/* ปีที่ใช้งานอยู่ */}
       {activeYear && (
-        <div className="alert bg-primary/10 border border-primary/20 mb-5 py-3">
-          <span className="text-lg">✅</span>
-          <div>
-            <p className="text-xs text-base-content/60">ปีการศึกษาที่ใช้งานอยู่</p>
-            <p className="font-semibold text-sm text-primary">
-              {activeYear.title || `ปี ${activeYear.year_be}`}
+        <div className="card anim-fade-up mb-5 flex flex-row items-center gap-3.5 bg-base-100 p-4">
+          <span className="gt-chip size-10">
+            <Icon name="checkCircle" size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs text-base-content/55">ปีการศึกษาที่ใช้งานอยู่</p>
+            <p className="truncate text-sm font-semibold text-primary">
+              {activeYear.title || `ปีการศึกษา ${activeYear.year_be}`}
             </p>
           </div>
         </div>
       )}
 
-      {/* Table */}
-      <div className="card bg-base-100 shadow-sm overflow-x-auto">
-        <table className="table table-zebra table-sm">
+      {/* ตาราง */}
+      <TableWrap className="anim-fade-up">
+        <table className="table table-sm">
           <thead>
-            <tr className="text-xs text-base-content/60 uppercase tracking-wide">
-              <th>#</th>
-              <th>📅 ปี พ.ศ.</th>
-              <th>📝 ชื่อปีการศึกษา</th>
-              <th>สถานะ school_app</th>
-              <th>GradTrack</th>
-              <th className="text-right">⚙️</th>
+            <tr>
+              <th className="w-10">#</th>
+              <th>ปี พ.ศ.</th>
+              <th>ชื่อปีการศึกษา</th>
+              <th>สถานะใน SchoolOS</th>
+              <th>สถานะใน GradTrack</th>
+              <th className="text-right">จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr>
-                <td colSpan={6} className="text-center py-10 text-base-content/40">
-                  <span className="loading loading-spinner loading-sm mr-2" />
-                  กำลังโหลด...
-                </td>
-              </tr>
+              <TableSkeleton rows={5} cols={6} />
             ) : years.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-10 text-base-content/30">
-                  ไม่พบข้อมูลปีการศึกษา
+                <td colSpan={6} className="p-0">
+                  <EmptyState
+                    icon="calendar"
+                    title="ไม่พบข้อมูลปีการศึกษา"
+                    hint="ปีการศึกษาดึงมาจาก SchoolOS — ตรวจสอบการเชื่อมต่อ แล้วลองโหลดหน้านี้อีกครั้ง"
+                  />
                 </td>
               </tr>
             ) : (
@@ -110,33 +106,35 @@ export default function AcademicYearsPage() {
                 const isActive = y.id === activeYearId;
                 return (
                   <tr key={y.id} className={isActive ? 'bg-primary/5' : ''}>
-                    <td className="text-base-content/40 text-xs">{i + 1}</td>
-                    <td className="font-medium">{y.year_be}</td>
+                    <td className="text-xs tabular-nums text-base-content/40">{i + 1}</td>
+                    <td className="font-medium tabular-nums">{y.year_be}</td>
                     <td>{y.title || `ปีการศึกษา ${y.year_be}`}</td>
                     <td>
                       {y.is_active ? (
-                        <span className="badge badge-success badge-sm">active</span>
+                        <Tag tone="success" icon="check">กำลังใช้งาน</Tag>
                       ) : (
-                        <span className="badge badge-ghost badge-sm">—</span>
+                        <span className="text-xs text-base-content/35">—</span>
                       )}
                     </td>
                     <td>
                       {isActive ? (
-                        <span className="badge badge-primary badge-sm">✅ ใช้งานอยู่</span>
+                        <Tag tone="primary" icon="checkCircle">ใช้งานอยู่</Tag>
                       ) : (
-                        <span className="text-base-content/30 text-xs">—</span>
+                        <span className="text-xs text-base-content/35">—</span>
                       )}
                     </td>
                     <td className="text-right">
                       {!isActive && (
                         <button
-                          className="btn btn-outline btn-primary btn-xs"
+                          className="btn btn-outline btn-primary btn-xs gap-1"
                           onClick={() => handleSetActive(y.id)}
                           disabled={saving === y.id}
                         >
                           {saving === y.id ? (
                             <span className="loading loading-spinner loading-xs" />
-                          ) : '🔄'}
+                          ) : (
+                            <Icon name="refresh" size={13} />
+                          )}
                           เลือกใช้
                         </button>
                       )}
@@ -147,7 +145,7 @@ export default function AcademicYearsPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
     </div>
   );
 }

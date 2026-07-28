@@ -1,200 +1,560 @@
 @import "tailwindcss";
 @plugin "daisyui";
 
-/* ─── Custom Theme: GradTrack ─────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   GradTrack — SchoolOS Design System
+   ม่วง #5B2D8E = โครงสร้าง · ทอง #F5C518 = เน้นย้ำ (ใช้เท่าที่จำเป็น)
+   ธีมหลัก = Light เท่านั้น
+   ══════════════════════════════════════════════════════════════════ */
+
 @plugin "daisyui/theme" {
   name: "gradtrack";
   default: true;
+  color-scheme: light;
 
-  /* พื้นหลัง: ขาว → ขาวม่วงอ่อน */
-  --color-base-100: oklch(100% 0 0);
-  --color-base-200: oklch(96% 0.012 290);
-  --color-base-300: oklch(90% 0.025 290);
-  --color-base-content: oklch(22% 0.04 290);
+  /* พื้นผิว: การ์ดขาว บนพื้นขาวอมม่วงจาง */
+  --color-base-100: #ffffff;
+  --color-base-200: #faf9fc;
+  --color-base-300: #e6e0f0;
+  --color-base-content: #1a1625;
 
-  /* Primary: ม่วงอ่อน */
-  --color-primary: oklch(58% 0.2 290);
-  --color-primary-content: oklch(100% 0 0);
+  /* Primary: ม่วงประจำโรงเรียน */
+  --color-primary: #5b2d8e;
+  --color-primary-content: #ffffff;
 
-  /* Secondary: เหลืองอ่อน */
-  --color-secondary: oklch(88% 0.14 95);
-  --color-secondary-content: oklch(28% 0.07 95);
+  /* Secondary: ม่วงจาง (ชิป, hover, พื้นรอง) */
+  --color-secondary: #f1edf7;
+  --color-secondary-content: #5b2d8e;
 
-  /* Accent: เหลืองทอง */
-  --color-accent: oklch(82% 0.16 88);
-  --color-accent-content: oklch(25% 0.06 88);
+  /* Accent: ทองประจำโรงเรียน */
+  --color-accent: #f5c518;
+  --color-accent-content: #241b04;
 
-  --color-neutral: oklch(38% 0.04 290);
-  --color-neutral-content: oklch(96% 0 0);
+  /* Neutral: น้ำเงินเข้ม (ข้อมูล/กำหนดการ) */
+  --color-neutral: #1e2a5e;
+  --color-neutral-content: #ffffff;
 
-  --color-info: oklch(68% 0.14 225);
-  --color-info-content: oklch(100% 0 0);
-  --color-success: oklch(63% 0.17 145);
-  --color-success-content: oklch(100% 0 0);
-  --color-warning: oklch(80% 0.16 85);
-  --color-warning-content: oklch(22% 0.06 85);
-  --color-error: oklch(58% 0.22 25);
-  --color-error-content: oklch(100% 0 0);
+  --color-info: #1e2a5e;
+  --color-info-content: #ffffff;
+  --color-success: #16a34a;
+  --color-success-content: #ffffff;
+  --color-warning: #f5c518;
+  --color-warning-content: #241b04;
+  --color-error: #dc2626;
+  --color-error-content: #ffffff;
 
-  --radius-box: 0.75rem;
-  --radius-btn: 0.5rem;
-  --radius-badge: 0.375rem;
+  /* daisyUI v5 shape tokens */
+  --radius-selector: 0.5rem;
+  --radius-field: 0.65rem;
+  --radius-box: 1rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
 }
 
-/* ─── Global Font ─────────────────────────────────────────────── */
-*, *::before, *::after {
-  font-family: 'Prompt', sans-serif;
-  font-weight: 400;
-}
-
-body {
-  font-size: 0.875rem; /* 14px — เล็กกว่า default */
-  line-height: 1.6;
-}
-
-h1, h2, h3, h4 {
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-/* ─── Input / Select / Textarea ──────────────────────────────── */
-/* ให้ทุก input มี bg เทาอ่อน + border ชัด */
-.input,
-.select,
-.textarea {
-  background-color: oklch(96% 0.012 290);
-  border: 1.5px solid oklch(82% 0.04 290);
-  color: oklch(22% 0.04 290);
-}
-
-.input:focus,
-.select:focus,
-.textarea:focus {
-  border-color: oklch(58% 0.2 290);
-  outline: 2px solid oklch(58% 0.2 290 / 0.2);
-  outline-offset: 0;
-}
-
-.input::placeholder,
-.textarea::placeholder {
-  color: oklch(65% 0.02 290);
-}
-
-/* ─── Modal ──────────────────────────────────────────────────── */
-.modal-box {
-  background-color: oklch(100% 0 0);
-  border: 1px solid oklch(88% 0.03 290);
-  box-shadow: 0 20px 60px oklch(58% 0.2 290 / 0.15);
-}
-
+/* ─── ตัวแปรของแบรนด์ (ใช้ตรง ๆ ใน component ได้) ─────────────── */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --gt-purple: #5b2d8e;
+  --gt-purple-soft: #7a3fc0;
+  --gt-gold: #f5c518;
+  --gt-gold-ink: #8a6a00;      /* ทองบนพื้นขาว ต้องเข้มพอ (4.5:1) */
+  --gt-navy: #1e2a5e;
+  --gt-sidebar: #341a54;
+  --gt-band: #2a1547;
+  --gt-aurora: #1d0f33;
+  --gt-border: #e6e0f0;
+  --gt-muted: #6b6478;
+  --gt-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* ═══ Base ═══════════════════════════════════════════════════════ */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+  html,
+  body {
+    font-family: "IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif;
+  }
+
+  body {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--color-base-content);
+    background-color: var(--color-base-200);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5 {
+    font-weight: 600;
+    letter-spacing: -0.011em;
+    line-height: 1.35;
+    color: var(--color-base-content);
+    margin: 0;
+  }
+
+  p { margin: 0; }
+
+  /* ตัวเลขทุกที่เรียงหลักตรงกัน — ตารางไม่กระตุกเวลาค่าเปลี่ยน */
+  td, th, .stat-value, .tabular { font-variant-numeric: tabular-nums; }
+
+  ::selection {
+    background: color-mix(in oklab, var(--gt-purple) 18%, transparent);
+    color: var(--gt-purple);
+  }
+
+  /* Focus ring เดียวกันทั้งระบบ — ห้ามถอดออก */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--gt-purple);
+    outline-offset: 2px;
+    border-radius: var(--radius-field);
+  }
+
+  /* Scrollbar ให้เข้าโทน ไม่ใช่แถบเทาระบบ */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbc2dd transparent;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: #cbc2dd;
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: #a996c6; }
+}
+
+/* ═══ Components ═════════════════════════════════════════════════ */
+@layer components {
+
+  /* ── การ์ด ────────────────────────────────────────────────── */
+  .card {
+    border: 1px solid var(--gt-border);
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgba(26, 22, 37, 0.04);
+  }
+  .card.card-interactive {
+    transition: transform 0.2s var(--gt-ease), box-shadow 0.2s var(--gt-ease),
+      border-color 0.2s var(--gt-ease);
+  }
+  .card.card-interactive:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklab, var(--gt-purple) 35%, transparent);
+    box-shadow: 0 10px 24px -12px rgba(91, 45, 142, 0.35);
+  }
+
+  /* ── ปุ่ม ─────────────────────────────────────────────────── */
+  .btn {
+    font-weight: 500;
+    letter-spacing: 0;
+    box-shadow: none;
+    transition: background-color 0.18s var(--gt-ease), color 0.18s var(--gt-ease),
+      border-color 0.18s var(--gt-ease), transform 0.12s var(--gt-ease);
+  }
+  .btn:active:not(:disabled) { transform: scale(0.97); }
+  .btn:disabled,
+  .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-primary {
+    box-shadow: 0 1px 2px rgba(91, 45, 142, 0.25);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #4a2474;
+    border-color: #4a2474;
+  }
+
+  /* ปุ่ม ghost ให้เห็นพื้นตอน hover — แต่ห้ามแตะสีตัวอักษร
+     ไม่งั้น .btn-ghost.text-error (ปุ่มลบ) จะกลายเป็นม่วงตอน hover แล้วความหมายหาย */
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--color-secondary);
+  }
+
+  .btn-outline:not(.btn-primary):not(.btn-error):not(.btn-success):not(.btn-warning) {
+    border-color: var(--gt-border);
+    color: var(--color-base-content);
+  }
+  .btn-outline:not(.btn-primary):not(.btn-error):not(.btn-success):not(.btn-warning):hover:not(:disabled) {
+    background-color: var(--color-secondary);
+    border-color: color-mix(in oklab, var(--gt-purple) 35%, transparent);
+    color: var(--gt-purple);
+  }
+
+  /* ── ฟอร์ม ───────────────────────────────────────────────── */
+  .input,
+  .select,
+  .textarea,
+  .file-input {
+    background-color: #ffffff;
+    border: 1px solid var(--gt-border);
+    color: var(--color-base-content);
+    border-radius: var(--radius-field);
+    transition: border-color 0.16s var(--gt-ease), box-shadow 0.16s var(--gt-ease);
+  }
+  .input:hover:not(:disabled),
+  .select:hover:not(:disabled),
+  .textarea:hover:not(:disabled) {
+    border-color: #cdc2de;
+  }
+  .input:focus,
+  .input:focus-within,
+  .select:focus,
+  .textarea:focus,
+  .file-input:focus {
+    border-color: var(--gt-purple);
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--gt-purple) 15%, transparent);
+  }
+  .input::placeholder,
+  .textarea::placeholder {
+    color: #9c94ad;
+  }
+  .input:disabled,
+  .select:disabled,
+  .textarea:disabled {
+    background-color: #f6f4fa;
+    color: #9c94ad;
+    cursor: not-allowed;
+  }
+
+  /* มือถือ: ต่ำกว่า 16px แล้ว iOS จะซูมหน้าจอเองตอนโฟกัส */
+  @media (max-width: 640px) {
+    .input, .select, .textarea { font-size: 16px; }
+  }
+
+  .label,
+  .fieldset-legend {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #4a4358;
+    padding-bottom: 0.25rem;
+  }
+
+  .checkbox:focus-visible,
+  .toggle:focus-visible,
+  .radio:focus-visible { outline-offset: 3px; }
+
+  /* ── ตาราง ───────────────────────────────────────────────── */
+  .table :where(thead) tr {
+    background-color: #faf8fd;
+    border-bottom: 1px solid var(--gt-border);
+  }
+  .table :where(thead) th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #5f5772;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    white-space: nowrap;
+  }
+  .table :where(tbody) tr {
+    border-bottom: 1px solid color-mix(in oklab, var(--gt-border) 60%, transparent);
+    transition: background-color 0.14s var(--gt-ease);
+  }
+  .table :where(tbody) tr:last-child { border-bottom: none; }
+  .table :where(tbody) tr:hover { background-color: #faf8fd; }
+  /* zebra ซ้อนกับ hover แล้วลายพร้อย — เอาลายม้าลายออก ใช้เส้นคั่นแทน */
+  .table-zebra :where(tbody) tr:nth-child(2n) { background-color: transparent; }
+  .table-zebra :where(tbody) tr:nth-child(2n):hover { background-color: #faf8fd; }
+  .table :where(thead, tbody) :where(tr) th:first-child,
+  .table :where(thead, tbody) :where(tr) td:first-child { padding-inline-start: 1rem; }
+  .table :where(thead, tbody) :where(tr) th:last-child,
+  .table :where(thead, tbody) :where(tr) td:last-child { padding-inline-end: 1rem; }
+
+  /* หัวตารางค้างไว้เวลาสกรอลล์รายการยาว
+     ต้องคู่กับกล่องที่จำกัดความสูง (.table-scroll) — ถ้ากล่องไม่มีความสูง
+     จะไม่มี scrollport ให้ sticky เกาะ แล้วหัวตารางก็จะไม่ค้างจริง */
+  .table-scroll {
+    max-height: min(70vh, 44rem);
+    overflow: auto;
+  }
+  .table-scroll :where(thead) th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: #faf8fd;
+    box-shadow: inset 0 -1px 0 var(--gt-border);
+  }
+
+  /* ── Badge ───────────────────────────────────────────────── */
+  .badge {
+    font-weight: 500;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .badge-ghost {
+    background-color: var(--color-secondary);
+    border-color: transparent;
+    color: #5f5772;
+  }
+  /* ทองบนพื้นขาวอ่านไม่ออก — ใช้พื้นทองจาง + ตัวอักษรทองเข้ม */
+  .badge-warning,
+  .badge-gold {
+    background-color: color-mix(in oklab, var(--gt-gold) 18%, white);
+    border-color: color-mix(in oklab, var(--gt-gold) 35%, white);
+    color: var(--gt-gold-ink);
+  }
+  .badge-soft-primary {
+    background-color: color-mix(in oklab, var(--gt-purple) 10%, white);
+    border-color: color-mix(in oklab, var(--gt-purple) 20%, white);
+    color: var(--gt-purple);
+  }
+  .badge-soft-success {
+    background-color: color-mix(in oklab, var(--color-success) 12%, white);
+    border-color: color-mix(in oklab, var(--color-success) 24%, white);
+    color: #15803d;
+  }
+  .badge-soft-error {
+    background-color: color-mix(in oklab, var(--color-error) 10%, white);
+    border-color: color-mix(in oklab, var(--color-error) 22%, white);
+    color: #b91c1c;
+  }
+  .badge-soft-navy {
+    background-color: color-mix(in oklab, var(--gt-navy) 10%, white);
+    border-color: color-mix(in oklab, var(--gt-navy) 20%, white);
+    color: var(--gt-navy);
+  }
+
+  /* ── Alert: พื้นอ่อน ไม่ใช่แถบสีทึบแสบตา ─────────────────── */
+  .alert {
+    border-radius: 0.85rem;
+    align-items: flex-start;
+    gap: 0.625rem;
+  }
+  .alert-info {
+    background-color: color-mix(in oklab, var(--gt-navy) 8%, white);
+    border: 1px solid color-mix(in oklab, var(--gt-navy) 18%, white);
+    color: var(--gt-navy);
+  }
+  .alert-success {
+    background-color: color-mix(in oklab, var(--color-success) 10%, white);
+    border: 1px solid color-mix(in oklab, var(--color-success) 22%, white);
+    color: #15803d;
+  }
+  .alert-warning {
+    background-color: color-mix(in oklab, var(--gt-gold) 16%, white);
+    border: 1px solid color-mix(in oklab, var(--gt-gold) 34%, white);
+    color: var(--gt-gold-ink);
+  }
+  .alert-error {
+    background-color: color-mix(in oklab, var(--color-error) 8%, white);
+    border: 1px solid color-mix(in oklab, var(--color-error) 20%, white);
+    color: #b91c1c;
+  }
+
+  /* ── Modal ───────────────────────────────────────────────── */
+  .modal-box {
+    background-color: #ffffff;
+    border: 1px solid var(--gt-border);
+    border-radius: 1.15rem;
+    box-shadow: 0 32px 64px -24px rgba(26, 22, 37, 0.45);
+  }
+  .modal-backdrop { background-color: rgba(26, 16, 42, 0.5); }
+  .modal[open] .modal-box,
+  .modal-open .modal-box {
+    animation: gt-scale-in 0.22s var(--gt-ease) both;
+  }
+
+  /* ── Menu (sidebar ใช้คลาสของตัวเอง) ─────────────────────── */
+  .menu :where(li > *:not(ul, .menu-title, details, summary)) {
+    border-radius: 0.65rem;
+    transition: background-color 0.15s var(--gt-ease), color 0.15s var(--gt-ease);
+  }
+
+  /* ── Tabs ────────────────────────────────────────────────── */
+  .tabs-boxed,
+  .tabs-box {
+    background-color: var(--color-secondary);
+    border-radius: 0.75rem;
+    padding: 0.25rem;
+  }
+  .tab { font-weight: 500; }
+
+  /* ── Progress / โหลด ─────────────────────────────────────── */
+  .progress { background-color: var(--color-secondary); border-radius: 999px; }
+  .progress::-webkit-progress-bar { background-color: var(--color-secondary); }
+  .loading { color: var(--gt-purple); }
+
+  .divider:before,
+  .divider:after { background-color: var(--gt-border); }
+
+  .dropdown-content { border-radius: 0.85rem; }
+
+  .toast > * { box-shadow: 0 18px 36px -18px rgba(26, 22, 37, 0.5); }
+}
+
+/* ═══ Utilities เฉพาะของ GradTrack ═══════════════════════════════ */
+@layer utilities {
+
+  /* ── Sidebar สีม่วงเข้ม ──────────────────────────────────── */
+  .gt-sidebar {
+    background-color: var(--gt-sidebar);
+    color: #f3effa;
+  }
+  .gt-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+    transition: background-color 0.16s var(--gt-ease), color 0.16s var(--gt-ease);
+    position: relative;
+  }
+  .gt-nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+  }
+  .gt-nav-link.is-active {
+    background-color: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+  }
+  /* active = ไอคอนทอง + ขีดทองด้านซ้าย (บอกตำแหน่งด้วยรูปทรง ไม่ใช่สีอย่างเดียว) */
+  .gt-nav-link.is-active svg { color: var(--gt-gold); }
+  .gt-nav-link.is-active::before {
+    content: "";
+    position: absolute;
+    left: -0.5rem;
+    top: 50%;
+    translate: 0 -50%;
+    width: 3px;
+    height: 1.25rem;
+    border-radius: 999px;
+    background-color: var(--gt-gold);
+  }
+  .gt-sidebar :where(a, button):focus-visible {
+    outline-color: var(--gt-gold);
+  }
+
+  /* ── Status band หัว dashboard ───────────────────────────── */
+  .gt-band {
+    background-color: var(--gt-band);
+    background-image:
+      radial-gradient(60% 120% at 12% 0%, rgba(122, 63, 192, 0.55) 0%, transparent 60%),
+      radial-gradient(40% 100% at 92% 100%, rgba(245, 197, 24, 0.14) 0%, transparent 62%);
+    color: #ffffff;
+    border-radius: 1rem;
+  }
+  .gt-band-rule {
+    width: 2.5rem;
+    height: 2px;
+    border-radius: 999px;
+    background-color: var(--gt-gold);
+  }
+
+  /* ── ชิปไอคอนหัวการ์ด ────────────────────────────────────── */
+  .gt-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    border-radius: 0.75rem;
+    background-color: color-mix(in oklab, var(--gt-purple) 10%, white);
+    color: var(--gt-purple);
+  }
+
+  /* ── หน้า login: aurora ──────────────────────────────────── */
+  .gt-aurora { background-color: var(--gt-aurora); overflow: hidden; }
+  .gt-aurora-blob {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(80px);
+    will-change: transform;
+  }
+  .gt-aurora-1 {
+    width: 30rem; height: 30rem; top: -8rem; left: -6rem;
+    background: rgba(122, 63, 192, 0.45);
+    animation: gt-drift-a 22s ease-in-out infinite alternate;
+  }
+  .gt-aurora-2 {
+    width: 26rem; height: 26rem; bottom: -6rem; left: 20%;
+    background: rgba(59, 42, 142, 0.5);
+    animation: gt-drift-b 26s ease-in-out infinite alternate;
+  }
+  .gt-aurora-3 {
+    width: 18rem; height: 18rem; top: 30%; right: -4rem;
+    background: rgba(245, 197, 24, 0.14);
+    animation: gt-drift-a 18s ease-in-out infinite alternate-reverse;
+  }
+
+  /* ── Motion ──────────────────────────────────────────────── */
+  .anim-fade-up {
+    animation: gt-fade-up 0.45s var(--gt-ease) both;
+    animation-delay: var(--anim-delay, 0s);
+  }
+  .anim-scale-in { animation: gt-scale-in 0.3s var(--gt-ease) both; }
+  .anim-bar-grow {
+    transform-origin: left;
+    animation: gt-bar-grow 0.7s var(--gt-ease) both;
+    animation-delay: 0.15s;
+  }
+  .stagger-children > * {
+    animation: gt-fade-up 0.4s var(--gt-ease) both;
+    animation-delay: calc(var(--stagger-base, 0s) + 40ms * var(--i, 0));
+  }
+
+  .gt-skeleton {
+    background: linear-gradient(90deg, #f1edf7 25%, #e8e2f2 37%, #f1edf7 63%);
+    background-size: 400% 100%;
+    animation: gt-shimmer 1.4s ease infinite;
+    border-radius: 0.5rem;
   }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+/* จบที่ transform: none ไม่ใช่ translateY(0) — สองอย่างนี้ผลทางสายตาเหมือนกัน
+   แต่ translateY(0) ยังนับเป็น transform อยู่ และ animation ตั้ง fill-mode ไว้ `both`
+   ค่านั้นจึงค้างอยู่ตลอด → element กลายเป็น stacking context ถาวร
+   ผลคือ dropdown ที่ absolute z-50 อยู่ข้างในถูกขังไว้ ลอยข้ามการ์ดใบถัดไปไม่ได้
+   (เจอจริงที่หน้า "นักเรียนตามมหาวิทยาลัย" — รายการมหาวิทยาลัยไปอยู่หลังการ์ด) */
+@keyframes gt-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gt-scale-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes gt-bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes gt-shimmer {
+  from { background-position: 100% 50%; }
+  to { background-position: 0 50%; }
+}
+@keyframes gt-drift-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(4rem, 2.5rem, 0) scale(1.12); }
+}
+@keyframes gt-drift-b {
+  from { transform: translate3d(0, 0, 0) scale(1.05); }
+  to { transform: translate3d(-3.5rem, -2rem, 0) scale(1); }
 }
 
-body {
-  margin: 0;
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+/* ═══ เคารพ prefers-reduced-motion ═══════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+/* ═══ Print: ซ่อนโครงแอป เหลือแต่เนื้อรายงาน ═════════════════════ */
+@media print {
+  .gt-no-print { display: none !important; }
+  body { background: #ffffff; }
 }

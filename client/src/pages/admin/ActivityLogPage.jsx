@@ -1,18 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../../utils/api';
+import Icon from '../../components/ui/Icon';
+import { PageHeader, TableWrap, TableSkeleton, EmptyState, Tag } from '../../components/ui';
 
 const ACTION_LABELS = {
-  login:               { label: 'เข้าสู่ระบบ',         icon: '🔑', color: 'badge-info' },
-  add_admission:       { label: 'บันทึกมหาวิทยาลัย',   icon: '📝', color: 'badge-primary' },
-  confirm_admission:   { label: 'ยืนยันสิทธิ์',         icon: '✅', color: 'badge-success' },
-  unconfirm_admission: { label: 'ยกเลิกการยืนยัน',     icon: '↩️', color: 'badge-warning' },
-  create_account:      { label: 'สร้าง Account',        icon: '👤', color: 'badge-accent' },
-  delete_account:      { label: 'ลบ Account',           icon: '🗑️', color: 'badge-error' },
+  login:               { label: 'เข้าสู่ระบบ',       icon: 'login',       tone: 'navy' },
+  add_admission:       { label: 'บันทึกมหาวิทยาลัย', icon: 'plus',        tone: 'primary' },
+  confirm_admission:   { label: 'ยืนยันสิทธิ์',       icon: 'checkCircle', tone: 'success' },
+  unconfirm_admission: { label: 'ยกเลิกการยืนยัน',   icon: 'undo',        tone: 'gold' },
+  create_account:      { label: 'สร้าง Account',      icon: 'userPlus',    tone: 'primary' },
+  delete_account:      { label: 'ลบ Account',         icon: 'trash',       tone: 'error' },
 };
 
 const ROLE_LABELS = {
-  admin:   { label: 'Admin',    badge: 'badge-primary' },
-  student: { label: 'นักเรียน', badge: 'badge-ghost' },
+  admin:   { label: 'Admin',    tone: 'primary', icon: 'shield' },
+  student: { label: 'นักเรียน', tone: 'muted',   icon: 'graduation' },
 };
 
 function formatDate(dateStr) {
@@ -41,7 +43,7 @@ export default function ActivityLogPage() {
       });
       setLogs(res.data.logs || []);
       setTotal(res.data.total || 0);
-    } catch (e) {
+    } catch {
       setLogs([]);
     } finally {
       setLoading(false);
@@ -56,40 +58,66 @@ export default function ActivityLogPage() {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-bold">🗒️ Activity Log</h1>
-        <span className="text-sm text-base-content/50">ทั้งหมด {total} รายการ</span>
-      </div>
+    <div>
+      <PageHeader
+        icon="log"
+        title="Activity Log"
+        subtitle={`บันทึกการใช้งานระบบทั้งหมด ${total.toLocaleString('th-TH')} รายการ`}
+      >
+        <button className="btn btn-ghost btn-sm gap-1.5" onClick={fetchLogs} disabled={loading}>
+          {loading ? (
+            <span className="loading loading-spinner loading-xs" />
+          ) : (
+            <Icon name="refresh" size={15} />
+          )}
+          รีเฟรช
+        </button>
+      </PageHeader>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <input
-          type="text"
-          className="input input-bordered input-sm w-60"
-          placeholder="🔍 ค้นหาชื่อ / action / เป้าหมาย..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+      {/* ตัวกรอง */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        <div className="relative w-full max-w-xs">
+          <Icon
+            name="search"
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+          />
+          <input
+            type="text"
+            className="input input-sm w-full pl-9"
+            placeholder="ค้นหาชื่อ / action / เป้าหมาย..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            aria-label="ค้นหาบันทึกการใช้งาน"
+          />
+        </div>
         <select
-          className="select select-bordered select-sm"
+          className="select select-sm"
           value={role}
           onChange={e => setRole(e.target.value)}
+          aria-label="กรองตาม role"
         >
           <option value="">ทุก Role</option>
           <option value="admin">Admin</option>
           <option value="student">นักเรียน</option>
         </select>
-        <button className="btn btn-ghost btn-sm" onClick={fetchLogs}>🔄 รีเฟรช</button>
+        {(search || role) && (
+          <button
+            className="btn btn-ghost btn-sm gap-1"
+            onClick={() => { setSearch(''); setRole(''); }}
+          >
+            <Icon name="x" size={14} />
+            ล้างตัวกรอง
+          </button>
+        )}
       </div>
 
-      {/* Table */}
-      <div className="card bg-base-100 shadow border border-base-200 overflow-x-auto">
-        <table className="table table-xs table-zebra w-full">
+      {/* ตาราง */}
+      <TableWrap sticky className="anim-fade-up">
+        <table className="table table-sm w-full">
           <thead>
-            <tr className="text-xs bg-base-200">
-              <th className="w-8">#</th>
+            <tr>
+              <th className="w-10">#</th>
               <th>เวลา</th>
               <th>ผู้ดำเนินการ</th>
               <th>Role</th>
@@ -99,42 +127,82 @@ export default function ActivityLogPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} className="text-center py-12"><span className="loading loading-spinner" /></td></tr>
+              <TableSkeleton rows={8} cols={6} />
             ) : logs.length === 0 ? (
-              <tr><td colSpan={6} className="text-center py-12 text-base-content/40">ไม่พบข้อมูล</td></tr>
-            ) : logs.map((log, i) => {
-              const actionInfo = ACTION_LABELS[log.action] || { label: log.action, icon: '📌', color: 'badge-ghost' };
-              const roleInfo = ROLE_LABELS[log.actor_role] || { label: log.actor_role, badge: 'badge-ghost' };
-              return (
-                <tr key={log.id}>
-                  <td className="text-base-content/40">{page * PAGE_SIZE + i + 1}</td>
-                  <td className="whitespace-nowrap text-xs text-base-content/60">{formatDate(log.created_at)}</td>
-                  <td>
-                    <div className="font-medium text-sm">{log.actor_name || log.actor_username}</div>
-                    {log.actor_name && <div className="text-xs text-base-content/40 font-mono">{log.actor_username}</div>}
-                  </td>
-                  <td>
-                    <span className={`badge badge-sm ${roleInfo.badge}`}>{roleInfo.label}</span>
-                  </td>
-                  <td>
-                    <span className={`badge badge-sm ${actionInfo.color} gap-1`}>
-                      {actionInfo.icon} {actionInfo.label}
-                    </span>
-                  </td>
-                  <td className="text-xs text-base-content/70 max-w-[200px] truncate">{log.target || '—'}</td>
-                </tr>
-              );
-            })}
+              <tr>
+                <td colSpan={6} className="p-0">
+                  <EmptyState
+                    icon="log"
+                    title={search || role ? 'ไม่พบรายการที่ค้นหา' : 'ยังไม่มีบันทึกการใช้งาน'}
+                    hint={
+                      search || role
+                        ? 'ลองเปลี่ยนคำค้นหา หรือล้างตัวกรองเพื่อดูทั้งหมด'
+                        : 'ระบบจะบันทึกการเข้าสู่ระบบและการแก้ไขข้อมูลไว้ที่นี่'
+                    }
+                  />
+                </td>
+              </tr>
+            ) : (
+              logs.map((log, i) => {
+                const actionInfo =
+                  ACTION_LABELS[log.action] || { label: log.action, icon: 'pin', tone: 'muted' };
+                const roleInfo =
+                  ROLE_LABELS[log.actor_role] || { label: log.actor_role, tone: 'muted' };
+                return (
+                  <tr key={log.id}>
+                    <td className="text-xs tabular-nums text-base-content/40">
+                      {page * PAGE_SIZE + i + 1}
+                    </td>
+                    <td className="whitespace-nowrap text-xs tabular-nums text-base-content/60">
+                      {formatDate(log.created_at)}
+                    </td>
+                    <td>
+                      <div className="text-sm font-medium">{log.actor_name || log.actor_username}</div>
+                      {log.actor_name && (
+                        <div className="font-mono text-xs text-base-content/40">
+                          {log.actor_username}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <Tag tone={roleInfo.tone} icon={roleInfo.icon}>{roleInfo.label}</Tag>
+                    </td>
+                    <td>
+                      <Tag tone={actionInfo.tone} icon={actionInfo.icon}>{actionInfo.label}</Tag>
+                    </td>
+                    <td className="max-w-[220px] truncate text-xs text-base-content/70">
+                      {log.target || '—'}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
 
-      {/* Pagination */}
+      {/* แบ่งหน้า */}
       {totalPages > 1 && (
-        <div className="flex justify-center gap-2 items-center">
-          <button className="btn btn-sm btn-ghost" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← ก่อนหน้า</button>
-          <span className="text-sm text-base-content/60">หน้า {page + 1} / {totalPages}</span>
-          <button className="btn btn-sm btn-ghost" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>ถัดไป →</button>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <button
+            className="btn btn-ghost btn-sm gap-1"
+            disabled={page === 0}
+            onClick={() => setPage(p => p - 1)}
+          >
+            <Icon name="chevronLeft" size={15} />
+            ก่อนหน้า
+          </button>
+          <span className="text-sm tabular-nums text-base-content/60">
+            หน้า {page + 1} / {totalPages}
+          </span>
+          <button
+            className="btn btn-ghost btn-sm gap-1"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage(p => p + 1)}
+          >
+            ถัดไป
+            <Icon name="chevronRight" size={15} />
+          </button>
         </div>
       )}
     </div>

@@ -2,18 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
 import PhotoUploadDialog from '../../components/PhotoUploadDialog';
+import Icon from '../../components/ui/Icon';
+import { PageHeader, TableWrap, TableSkeleton, EmptyState, Tag } from '../../components/ui';
 
 const STATUS_LABEL = {
-  none: { label: 'ยังไม่บันทึก', badge: 'badge-error', icon: '❌' },
-  pending: { label: 'บันทึกแล้ว (ยังไม่ยืนยัน)', badge: 'badge-warning', icon: '⏳' },
-  confirmed: { label: 'ยืนยันสิทธิ์แล้ว', badge: 'badge-success', icon: '✅' },
-};
-
-const FILTER_BTN = {
-  all:       'btn-neutral',
-  none:      'btn-error',
-  pending:   'btn-warning',
-  confirmed: 'btn-success',
+  none:      { label: 'ยังไม่บันทึก',   short: 'ยังไม่บันทึก', tone: 'error',   icon: 'xCircle' },
+  pending:   { label: 'รอยืนยันสิทธิ์', short: 'รอยืนยัน',     tone: 'gold',    icon: 'clock' },
+  confirmed: { label: 'ยืนยันสิทธิ์แล้ว', short: 'ยืนยันแล้ว',  tone: 'success', icon: 'checkCircle' },
 };
 
 // พื้นหลังตารางหมากรุก — ช่วยให้เห็นว่ารูปที่ "ตัดพื้นหลังแล้ว" (PNG โปร่งใส) มองทะลุได้
@@ -287,18 +282,34 @@ export default function AdmissionStatusPage() {
     return true;
   });
 
-  return (
-    <div className="p-4 flex flex-col gap-4">
-      <h1 className="text-xl font-bold">📋 สถานะการบันทึกผลสอบ</h1>
+  const FILTERS = [
+    { key: 'all',       label: 'ทั้งหมด',      icon: 'list' },
+    { key: 'none',      label: 'ยังไม่บันทึก', icon: 'xCircle' },
+    { key: 'pending',   label: 'รอยืนยัน',     icon: 'clock' },
+    { key: 'confirmed', label: 'ยืนยันแล้ว',   icon: 'checkCircle' },
+  ];
 
-      {/* ── ค้นหา + Import ── */}
-      <div className="flex flex-wrap gap-3 items-center">
-        <input
-          className="input input-bordered input-sm w-56"
-          placeholder="🔍 ค้นหาชื่อ / รหัส"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+  return (
+    <div>
+      <PageHeader
+        icon="clipboard"
+        title="สถานะการบันทึกผลสอบ"
+        subtitle="กดที่แถวของนักเรียนเพื่อดู เพิ่ม หรือแก้ไขรายการมหาวิทยาลัย"
+      >
+        <div className="relative w-full sm:w-56">
+          <Icon
+            name="search"
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+          />
+          <input
+            className="input input-sm w-full pl-9"
+            placeholder="ค้นหาชื่อ / รหัส"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            aria-label="ค้นหานักเรียน"
+          />
+        </div>
         <input
           ref={importInputRef}
           type="file"
@@ -307,109 +318,146 @@ export default function AdmissionStatusPage() {
           onChange={handleImportFile}
         />
         <button
-          className={`btn btn-sm btn-success gap-2 ${importLoading ? 'loading' : ''}`}
+          className="btn btn-primary btn-sm gap-1.5"
           onClick={() => importInputRef.current?.click()}
           disabled={importLoading}
         >
-          {!importLoading && '📥'} Import Excel
+          {importLoading ? (
+            <span className="loading loading-spinner loading-xs" />
+          ) : (
+            <Icon name="upload" size={15} />
+          )}
+          นำเข้า Excel
         </button>
-      </div>
+      </PageHeader>
 
-      {/* ── ปุ่ม filter ── */}
-      <div className="flex flex-wrap gap-2">
-        {[
-          { key: 'all',       label: 'ทั้งหมด' },
-          { key: 'none',      label: '❌ ยังไม่บันทึก' },
-          { key: 'pending',   label: '⏳ รอยืนยัน' },
-          { key: 'confirmed', label: '✅ ยืนยันแล้ว' },
-        ].map(({ key, label }) => (
+      {/* ── ตัวกรองสถานะ ── */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {FILTERS.map(({ key, label, icon }) => (
           <button
             key={key}
             onClick={() => setFilter(key)}
-            className={`btn btn-sm ${FILTER_BTN[key]} transition-opacity ${filter !== key ? 'opacity-40' : ''}`}
+            aria-pressed={filter === key}
+            className={`btn btn-sm gap-1.5 ${filter === key ? 'btn-primary' : 'btn-outline'}`}
           >
+            <Icon name={icon} size={14} />
             {label}
-            <span className="ml-1 font-bold text-inherit">
-              {counts[key]}
-            </span>
+            <span className="font-semibold tabular-nums">{counts[key]}</span>
           </button>
         ))}
-      </div>
 
-      {/* ── ปุ่มตรวจสอบนักเรียนที่ยืนยันสิทธิ์เกิน 1 ที่ ── */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setFilter(filter === 'multi' ? 'all' : 'multi')}
-          className={`btn btn-sm gap-2 ${multiConfirm.length > 0 ? 'btn-error' : 'btn-ghost'} ${filter === 'multi' ? '' : 'opacity-70'}`}
-          disabled={multiConfirm.length === 0}
-          title="นักเรียนที่ยืนยันสิทธิ์มากกว่า 1 ที่ ซึ่งผิดหลักเกณฑ์ (มักเกิดจากตอน import)"
-        >
-          ⚠️ ยืนยันสิทธิ์เกิน 1 ที่
-          <span className="badge badge-sm badge-neutral font-bold">{multiConfirm.length}</span>
-        </button>
         {multiConfirm.length > 0 && (
-          <span className="text-xs text-error/80">
-            พบนักเรียน {multiConfirm.length} คนที่ยืนยันสิทธิ์เกิน 1 ที่ — คลิกเพื่อดูและแก้ไข
-          </span>
+          <button
+            onClick={() => setFilter(filter === 'multi' ? 'all' : 'multi')}
+            aria-pressed={filter === 'multi'}
+            className={`btn btn-sm gap-1.5 ${
+              filter === 'multi' ? 'btn-error' : 'btn-outline border-error/40 text-error hover:bg-error/10'
+            }`}
+            title="นักเรียนที่ยืนยันสิทธิ์มากกว่า 1 ที่ ซึ่งผิดหลักเกณฑ์ (มักเกิดจากตอน import)"
+          >
+            <Icon name="warning" size={14} />
+            ยืนยันเกิน 1 ที่
+            <span className="font-semibold tabular-nums">{multiConfirm.length}</span>
+          </button>
         )}
       </div>
 
       {/* ── คำอธิบายสัญลักษณ์รูป ── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-base-content/60">
-        <span className="font-semibold text-base-content/50">รูปนักเรียน:</span>
-        <span className="flex items-center gap-1"><span className="text-base">👤</span> ยังไม่ใส่รูป</span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-4 rounded-sm ring-1 ring-base-300 bg-base-300" /> ใส่รูปแล้ว (ยังไม่ตัดพื้นหลัง)
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-base-content/55">
+        <span className="font-medium text-base-content/45">รูปนักเรียน:</span>
+        <span className="flex items-center gap-1.5">
+          <Icon name="user" size={13} className="text-base-content/35" />
+          ยังไม่ใส่รูป
         </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-4 rounded-sm ring-1 ring-base-300" style={CHECKER_STYLE} />
-          <span className="text-success">✂️</span> ตัดพื้นหลังแล้ว (โปร่งใส)
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-4 w-3 rounded-sm bg-base-300 ring-1 ring-base-300" />
+          ใส่รูปแล้ว (ยังไม่ตัดพื้นหลัง)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-4 w-3 rounded-sm ring-1 ring-base-300" style={CHECKER_STYLE} />
+          <Icon name="sparkle" size={13} className="text-success" />
+          ตัดพื้นหลังแล้ว (โปร่งใส)
         </span>
       </div>
 
       {/* ── ตาราง ── */}
-      {loading ? (
-        <div className="flex justify-center py-10">
-          <span className="loading loading-spinner loading-lg" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <p className="text-base-content/40 text-center py-10">ไม่พบข้อมูล</p>
-      ) : (
-        <div className="overflow-x-auto rounded-xl shadow">
-          <table className="table table-sm bg-base-100">
-            <thead>
-              <tr className="text-xs">
-                <th>#</th>
-                <th>รหัส</th>
-                <th>รูป</th>
-                <th>ชื่อ-นามสกุล</th>
-                <th>ชั้น</th>
-                <th>ห้อง</th>
-                <th>สถานะ</th>
-                <th>รายการที่บันทึก</th>
+      <TableWrap sticky className="anim-fade-up">
+        <table className="table table-sm">
+          <thead>
+            <tr>
+              <th className="w-10">#</th>
+              <th>รหัส</th>
+              <th className="w-16">รูป</th>
+              <th>ชื่อ-นามสกุล</th>
+              <th>ชั้น</th>
+              <th>ห้อง</th>
+              <th>สถานะ</th>
+              <th>รายการที่บันทึก</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <TableSkeleton rows={8} cols={8} />
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="p-0">
+                  <EmptyState
+                    icon={search || filter !== 'all' ? 'search' : 'clipboard'}
+                    title={
+                      search || filter !== 'all'
+                        ? 'ไม่พบนักเรียนตามเงื่อนไขนี้'
+                        : 'ยังไม่มีข้อมูลนักเรียน'
+                    }
+                    hint={
+                      search || filter !== 'all'
+                        ? 'ลองเปลี่ยนคำค้นหา หรือเลือกตัวกรอง ทั้งหมด'
+                        : 'ตรวจสอบปีการศึกษาที่ใช้งานอยู่ในหน้า ปีการศึกษา'
+                    }
+                    action={
+                      (search || filter !== 'all') && (
+                        <button
+                          className="btn btn-outline btn-sm gap-1"
+                          onClick={() => { setSearch(''); setFilter('all'); }}
+                        >
+                          <Icon name="x" size={14} />
+                          ล้างตัวกรอง
+                        </button>
+                      )
+                    }
+                  />
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s, i) => {
+            ) : (
+              filtered.map((s, i) => {
                 const st = STATUS_LABEL[s.status];
                 const nConfirmed = confirmedCount(s);
                 const overConfirmed = nConfirmed > 1;
                 return (
                   <tr
                     key={s.student_code}
-                    className={`hover:bg-base-200 transition-colors cursor-pointer ${overConfirmed ? 'bg-error/10' : ''}`}
+                    className={`cursor-pointer ${overConfirmed ? 'bg-error/5' : ''}`}
                     onClick={() => openModal(s)}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openModal(s);
+                      }
+                    }}
+                    aria-label={`เปิดรายละเอียดของ ${s.first_name} ${s.last_name}`}
                   >
-                    <td className="text-base-content/40">{i + 1}</td>
-                    <td className="font-mono">{s.student_code}</td>
+                    <td className="text-xs tabular-nums text-base-content/40">{i + 1}</td>
+                    <td className="font-mono text-xs tabular-nums">{s.student_code}</td>
                     <td>
                       <div
-                        className="relative w-9 h-12 rounded overflow-hidden ring-1 ring-base-300 flex items-center justify-center"
+                        className="relative flex h-12 w-9 items-center justify-center overflow-hidden rounded-md ring-1 ring-base-300"
                         style={s.photo_url ? CHECKER_STYLE : undefined}
                         title={
-                          !s.photo_url ? 'ยังไม่ใส่รูป'
-                            : isBgRemoved(s.photo_url) ? 'ใส่รูปแล้ว · ตัดพื้นหลังแล้ว'
-                            : 'ใส่รูปแล้ว · ยังไม่ตัดพื้นหลัง'
+                          !s.photo_url
+                            ? 'ยังไม่ใส่รูป'
+                            : isBgRemoved(s.photo_url)
+                              ? 'ใส่รูปแล้ว · ตัดพื้นหลังแล้ว'
+                              : 'ใส่รูปแล้ว · ยังไม่ตัดพื้นหลัง'
                         }
                       >
                         {s.photo_url ? (
@@ -418,42 +466,44 @@ export default function AdmissionStatusPage() {
                               src={resolveMediaUrl(s.photo_url)}
                               alt=""
                               loading="lazy"
-                              className="w-full h-full object-cover"
+                              className="h-full w-full object-cover"
                             />
                             {isBgRemoved(s.photo_url) && (
-                              <span className="absolute bottom-0 right-0 bg-success text-success-content text-[9px] leading-none px-0.5 py-px rounded-tl">
-                                ✂️
+                              <span className="absolute bottom-0 right-0 grid size-4 place-items-center rounded-tl bg-success text-success-content">
+                                <Icon name="check" size={10} strokeWidth={2.6} />
                               </span>
                             )}
                           </>
                         ) : (
-                          <span className="text-base-content/30 text-lg">👤</span>
+                          <Icon name="user" size={18} className="text-base-content/25" />
                         )}
                       </div>
                     </td>
-                    <td>{s.title_prefix}{s.first_name} {s.last_name}</td>
-                    <td>{s.class_level}</td>
-                    <td>{s.class_room}</td>
-                    <td>
-                      <span className={`badge ${st.badge} badge-sm gap-1 whitespace-nowrap`}>
-                        {st.icon} {st.label}
-                      </span>
+                    <td className="whitespace-nowrap">
+                      {s.title_prefix}{s.first_name} {s.last_name}
                     </td>
-                    <td className="text-base-content/50 text-xs">
-                      {s.admissions.length > 0 ? `${s.admissions.length} แห่ง` : '—'}
+                    <td className="tabular-nums">{s.class_level}</td>
+                    <td className="tabular-nums">{s.class_room}</td>
+                    <td>
+                      <Tag tone={st.tone} icon={st.icon}>{st.short}</Tag>
+                    </td>
+                    <td className="text-xs text-base-content/55">
+                      <span className="whitespace-nowrap">
+                        {s.admissions.length > 0 ? `${s.admissions.length} แห่ง` : '—'}
+                      </span>
                       {overConfirmed && (
-                        <span className="badge badge-error badge-sm gap-1 ml-1 whitespace-nowrap">
-                          ⚠️ ยืนยัน {nConfirmed} ที่
-                        </span>
+                        <Tag tone="error" icon="warning" className="ml-1.5">
+                          ยืนยัน {nConfirmed} ที่
+                        </Tag>
                       )}
                     </td>
                   </tr>
                 );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+              })
+            )}
+          </tbody>
+        </table>
+      </TableWrap>
 
       {/* ── Modal รายละเอียดของนักเรียน ── */}
       <dialog ref={modalRef} className="modal">
@@ -461,27 +511,44 @@ export default function AdmissionStatusPage() {
           {selected && (
             <>
               {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="font-bold text-lg">{selected.title_prefix}{selected.first_name} {selected.last_name}</h3>
-                  <p className="text-sm text-base-content/60 font-mono">
-                    รหัส {selected.student_code} · ม.{selected.class_level}/{selected.class_room}
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold leading-tight">
+                    {selected.title_prefix}{selected.first_name} {selected.last_name}
+                  </h3>
+                  <p className="mt-0.5 text-sm text-base-content/55">
+                    รหัส <span className="font-mono tabular-nums">{selected.student_code}</span> · ม.
+                    {selected.class_level}/{selected.class_room}
                   </p>
                 </div>
-                <span className={`badge ${STATUS_LABEL[selected.status].badge} badge-md`}>
-                  {STATUS_LABEL[selected.status].icon} {STATUS_LABEL[selected.status].label}
-                </span>
+                <Tag
+                  tone={STATUS_LABEL[selected.status].tone}
+                  icon={STATUS_LABEL[selected.status].icon}
+                >
+                  {STATUS_LABEL[selected.status].label}
+                </Tag>
               </div>
 
-              <div className="flex items-center gap-3 mb-4 p-2 rounded-lg bg-base-200/60">
-                <div className="avatar">
-                  <div className="w-16 h-16 rounded-lg bg-base-300 overflow-hidden">
-                    {selected.photo_url
-                      ? <img src={resolveMediaUrl(selected.photo_url)} alt="student" className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center text-2xl">👤</div>}
-                  </div>
+              {/* รูปนักเรียน */}
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-base-300 bg-base-200/50 p-3">
+                <div className="size-16 shrink-0 overflow-hidden rounded-xl bg-base-300">
+                  {selected.photo_url ? (
+                    <img
+                      src={resolveMediaUrl(selected.photo_url)}
+                      alt={`รูปของ ${selected.first_name}`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid h-full w-full place-items-center text-base-content/30">
+                      <Icon name="user" size={26} />
+                    </span>
+                  )}
                 </div>
-                <div className="flex-1 text-xs text-base-content/60">รูปนักเรียน (แก้ไขได้โดยแอดมิน)</div>
+                <p className="flex-1 text-xs text-base-content/55">
+                  รูปนักเรียน
+                  <br />
+                  (แอดมินแก้ไขได้)
+                </p>
                 <input
                   ref={photoInputRef}
                   type="file"
@@ -489,31 +556,41 @@ export default function AdmissionStatusPage() {
                   className="hidden"
                   onChange={handleAdminUploadPhoto}
                 />
-                <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-1.5">
                   <button
-                    className={`btn btn-sm btn-outline ${photoUploading ? 'loading' : ''}`}
+                    className="btn btn-outline btn-sm gap-1.5"
                     onClick={() => photoInputRef.current?.click()}
                     disabled={photoUploading || photoBusy}
                   >
-                    {!photoUploading && '🖼️'} ใส่รูป
+                    {photoUploading ? (
+                      <span className="loading loading-spinner loading-xs" />
+                    ) : (
+                      <Icon name="image" size={14} />
+                    )}
+                    ใส่รูป
                   </button>
                   {selected.photo_url && (
                     <>
                       <button
-                        className="btn btn-sm btn-outline"
+                        className="btn btn-outline btn-sm gap-1.5"
                         onClick={removeBgFromCurrent}
                         disabled={photoUploading || photoBusy}
                         title="ลบพื้นหลังของรูปที่อัปโหลดแล้ว"
                       >
-                        {photoBusy ? <span className="loading loading-spinner loading-xs" /> : '✂️'} ลบพื้นหลัง
+                        {photoBusy ? (
+                          <span className="loading loading-spinner loading-xs" />
+                        ) : (
+                          <Icon name="sparkle" size={14} />
+                        )}
+                        ลบพื้นหลัง
                       </button>
                       <button
-                        className="btn btn-sm btn-outline btn-error"
+                        className="btn btn-outline btn-error btn-sm gap-1.5"
                         onClick={deleteAdminPhoto}
                         disabled={photoUploading || photoBusy}
-                        title="ลบรูปนักเรียน"
                       >
-                        🗑️ ลบรูป
+                        <Icon name="trash" size={14} />
+                        ลบรูป
                       </button>
                     </>
                   )}
@@ -530,92 +607,137 @@ export default function AdmissionStatusPage() {
 
               {/* แจ้งเตือนยืนยันสิทธิ์เกิน 1 ที่ */}
               {confirmedCount(selected) > 1 && (
-                <div className="alert alert-error text-sm mb-3 py-2">
-                  <span>
-                    ⚠️ นักเรียนคนนี้ยืนยันสิทธิ์ <b>{confirmedCount(selected)}</b> ที่
-                    ซึ่งผิดหลักเกณฑ์ (ยืนยันได้เพียง 1 ที่) — โปรดยกเลิกยืนยันรายการที่เกินด้วยปุ่ม ↩️
+                <div role="alert" className="alert alert-error mb-3 py-2.5">
+                  <Icon name="warning" size={17} className="mt-px" />
+                  <span className="text-sm">
+                    นักเรียนคนนี้ยืนยันสิทธิ์ <b className="tabular-nums">{confirmedCount(selected)}</b> ที่
+                    ซึ่งผิดหลักเกณฑ์ (ยืนยันได้เพียง 1 ที่) — โปรดยกเลิกยืนยันรายการที่เกิน
                   </span>
                 </div>
               )}
 
               {/* รายการ admissions */}
               {selected.admissions.length === 0 ? (
-                <p className="text-center text-base-content/40 py-4">ยังไม่มีการบันทึกข้อมูล</p>
+                <EmptyState
+                  icon="university"
+                  title="ยังไม่มีการบันทึกข้อมูล"
+                  hint="เพิ่มมหาวิทยาลัยที่นักเรียนสอบติดได้จากช่องด้านล่าง"
+                  className="py-6"
+                />
               ) : (
-                <div className="flex flex-col gap-2">
+                <ul className="flex flex-col gap-2">
                   {selected.admissions.map((a, idx) => (
-                    <div
+                    <li
                       key={a.id}
-                      className={`flex items-center gap-3 rounded-xl px-3 py-2 ${a.confirmed ? 'bg-success/10 ring-1 ring-success' : 'bg-base-200'}`}
+                      className={`flex items-start gap-3 rounded-xl border p-3 ${
+                        a.confirmed ? 'border-success/35 bg-success/8' : 'border-base-300 bg-base-200/50'
+                      }`}
                     >
-                      <span className="text-base-content/40 text-xs w-4 flex-shrink-0">{idx + 1}</span>
-                      {a.logo_url
-                        ? <img src={resolveMediaUrl(a.logo_url)} alt="" className="w-9 h-9 object-contain rounded flex-shrink-0" />
-                        : <div className="w-9 h-9 bg-base-300 rounded flex items-center justify-center text-lg flex-shrink-0">🏛️</div>}
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm leading-tight">{a.university_name}</p>
-                        {a.campus && <p className="text-xs text-info font-medium">วิทยาเขต {a.campus}</p>}
+                      <span className="w-4 shrink-0 text-xs tabular-nums text-base-content/40">
+                        {idx + 1}
+                      </span>
+                      {a.logo_url ? (
+                        <img
+                          src={resolveMediaUrl(a.logo_url)}
+                          alt=""
+                          width="36"
+                          height="36"
+                          loading="lazy"
+                          className="size-9 shrink-0 rounded-lg bg-base-100 object-contain p-0.5"
+                        />
+                      ) : (
+                        <span className="gt-chip size-9">
+                          <Icon name="university" size={18} />
+                        </span>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold leading-tight">{a.university_name}</p>
+                        {a.campus && (
+                          <p className="flex items-center gap-1 text-xs text-base-content/55">
+                            <Icon name="pin" size={11} />
+                            วิทยาเขต {a.campus}
+                          </p>
+                        )}
                         <p className="text-xs text-base-content/60">{a.faculty_name}</p>
                         <p className="text-xs text-base-content/50">{a.program_name}</p>
                         {a.created_at && (
-                          <p className="text-[10px] text-base-content/40 mt-0.5">
-                            {new Date(a.created_at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                          <p className="mt-0.5 text-[10px] tabular-nums text-base-content/40">
+                            {new Date(a.created_at).toLocaleString('th-TH', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })}
                           </p>
                         )}
                       </div>
-                      {/* Action buttons */}
-                      <div className="flex flex-col gap-1 flex-shrink-0">
+                      <div className="flex shrink-0 flex-col gap-1">
                         <button
-                          className={`btn btn-xs ${a.confirmed ? 'btn-warning' : 'btn-success'}`}
+                          className={`btn btn-xs gap-1 ${a.confirmed ? 'btn-outline' : 'btn-success'}`}
                           disabled={actionLoading === a.id}
                           onClick={() => handleToggleConfirm(a)}
-                          title={a.confirmed ? 'ยกเลิกยืนยัน' : 'ยืนยันสิทธิ์'}
                         >
-                          {actionLoading === a.id ? <span className="loading loading-spinner loading-xs" /> : a.confirmed ? '↩️' : '✅'}
+                          {actionLoading === a.id ? (
+                            <span className="loading loading-spinner loading-xs" />
+                          ) : (
+                            <Icon name={a.confirmed ? 'undo' : 'check'} size={12} strokeWidth={2.2} />
+                          )}
+                          {a.confirmed ? 'ยกเลิก' : 'ยืนยัน'}
                         </button>
                         <button
-                          className="btn btn-xs btn-error"
+                          className="btn btn-ghost btn-xs gap-1 text-error"
                           disabled={actionLoading === a.id}
                           onClick={() => handleDeleteAdmission(a)}
-                          title="ลบ"
                         >
-                          🗑️
+                          <Icon name="trash" size={12} />
+                          ลบ
                         </button>
                       </div>
-                    </div>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
 
               {/* ── เพิ่มรายการ ── */}
-              <div className="divider text-xs">เพิ่มมหาวิทยาลัย</div>
-              <div className="flex flex-col gap-2">
-                <select
-                  className="select select-bordered select-sm w-full bg-base-100 text-base-content"
-                  value={addForm.uni_id}
-                  onChange={e => { setUniPrograms([]); setAddForm(f => ({ ...f, uni_id: e.target.value, program_id: '' })); }}
-                >
-                  <option value="">— เลือกมหาวิทยาลัย —</option>
-                  {universities.map(u => (
-                    <option key={u.id} value={u.id}>{getUniversityLabel(u)}</option>
-                  ))}
-                </select>
-                {addForm.uni_id && (
+              <div className="divider text-xs text-base-content/50">เพิ่มมหาวิทยาลัย</div>
+              <div className="flex flex-col gap-2.5">
+                <div>
+                  <label htmlFor="add-uni" className="label">มหาวิทยาลัย</label>
                   <select
-                    className="select select-bordered select-sm w-full bg-base-100 text-base-content"
-                    value={addForm.program_id}
-                    onChange={e => setAddForm(f => ({ ...f, program_id: e.target.value }))}
+                    id="add-uni"
+                    className="select select-sm w-full"
+                    value={addForm.uni_id}
+                    onChange={e => {
+                      setUniPrograms([]);
+                      setAddForm(f => ({ ...f, uni_id: e.target.value, program_id: '' }));
+                    }}
                   >
-                    <option value="">— เลือกสาขา/หลักสูตร —</option>
-                    {uniPrograms.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.faculty_name ? `[${p.faculty_name}] ` : ''}{p.program_name_th}
-                        {p.program_type ? ` (${p.program_type})` : ''}
-                      </option>
+                    <option value="">— เลือกมหาวิทยาลัย —</option>
+                    {universities.map(u => (
+                      <option key={u.id} value={u.id}>{getUniversityLabel(u)}</option>
                     ))}
                   </select>
+                </div>
+
+                {addForm.uni_id && (
+                  <div>
+                    <label htmlFor="add-prog" className="label">สาขา / หลักสูตร</label>
+                    <select
+                      id="add-prog"
+                      className="select select-sm w-full"
+                      value={addForm.program_id}
+                      onChange={e => setAddForm(f => ({ ...f, program_id: e.target.value }))}
+                    >
+                      <option value="">— เลือกสาขา/หลักสูตร —</option>
+                      {uniPrograms.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.faculty_name ? `[${p.faculty_name}] ` : ''}{p.program_name_th}
+                          {p.program_type ? ` (${p.program_type})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
-                <label className="flex items-center gap-2 text-sm cursor-pointer">
+
+                <label className="flex cursor-pointer items-center gap-2.5 text-sm">
                   <input
                     type="checkbox"
                     className="checkbox checkbox-sm checkbox-success"
@@ -624,18 +746,24 @@ export default function AdmissionStatusPage() {
                   />
                   ยืนยันสิทธิ์ทันที
                 </label>
+
                 <button
-                  className={`btn btn-primary btn-sm ${addLoading ? 'loading' : ''}`}
+                  className="btn btn-primary btn-sm gap-1.5"
                   disabled={!addForm.program_id || addLoading}
                   onClick={handleAddAdmission}
                 >
-                  {!addLoading && '➕'} เพิ่มรายการ
+                  {addLoading ? (
+                    <span className="loading loading-spinner loading-xs" />
+                  ) : (
+                    <Icon name="plus" size={15} />
+                  )}
+                  เพิ่มรายการ
                 </button>
               </div>
             </>
           )}
           <div className="modal-action">
-            <button className="btn" onClick={closeModal}>ปิด</button>
+            <button className="btn btn-ghost btn-sm" onClick={closeModal}>ปิด</button>
           </div>
         </div>
         {/* กดพื้นหลังเพื่อปิด */}
@@ -649,47 +777,75 @@ export default function AdmissionStatusPage() {
         <div className="modal-box max-w-md">
           {importResult?.ok ? (
             <>
-              <h3 className="font-bold text-lg text-success">✅ Import สำเร็จ</h3>
-              <div className="mt-3 flex flex-col gap-1 text-sm">
-                <p>รวมทั้งหมด: <b>{importResult.total}</b> แถว</p>
-                <p>นำเข้าสำเร็จ: <b className="text-success">{importResult.imported}</b> รายการ</p>
-                <p>ข้ามไป: <b className="text-warning">{importResult.skipped}</b> รายการ</p>
+              <div className="flex items-center gap-3">
+                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
+                  <Icon name="checkCircle" size={20} />
+                </span>
+                <h3 className="text-base font-semibold">นำเข้าข้อมูลสำเร็จ</h3>
               </div>
-              {importResult.errors?.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-xs font-semibold text-error mb-1">รายละเอียดที่ข้าม ({importResult.errors.length}):</p>
-                  <div className="max-h-32 overflow-y-auto text-xs text-base-content/60 flex flex-col gap-0.5">
-                    {importResult.errors.map((e, i) => <p key={i}>• {e}</p>)}
+
+              <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+                {[
+                  { label: 'รวมทั้งหมด', value: importResult.total, cls: 'text-base-content' },
+                  { label: 'นำเข้าสำเร็จ', value: importResult.imported, cls: 'text-success' },
+                  { label: 'ข้ามไป', value: importResult.skipped, cls: 'text-[#8a6a00]' },
+                ].map((s) => (
+                  <div key={s.label} className="rounded-xl border border-base-300 p-3">
+                    <dd className={`text-xl font-semibold tabular-nums ${s.cls}`}>{s.value}</dd>
+                    <dt className="mt-0.5 text-[11px] text-base-content/55">{s.label}</dt>
                   </div>
+                ))}
+              </dl>
+
+              {importResult.errors?.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-1 text-xs font-semibold text-error">
+                    รายละเอียดที่ข้าม ({importResult.errors.length}):
+                  </p>
+                  <ul className="flex max-h-32 flex-col gap-0.5 overflow-y-auto text-xs text-base-content/60">
+                    {importResult.errors.map((e, i) => <li key={i}>• {e}</li>)}
+                  </ul>
                 </div>
               )}
+
               {importResult.warnings?.length > 0 && (
-                <div className="mt-3 border border-warning/40 rounded-lg p-3 bg-warning/5">
-                  <p className="text-sm font-semibold text-warning mb-1">
-                    ⚠️ พบ {importResult.warnings.length} รายการที่มีรหัสนักเรียนถูกต้อง แต่ไม่พบข้อมูลในระบบ
+                <div className="mt-4 rounded-xl border border-[#F5C518]/45 bg-[#F5C518]/8 p-3">
+                  <p className="mb-2 flex items-start gap-1.5 text-sm font-semibold text-[#8a6a00]">
+                    <Icon name="warning" size={16} className="mt-0.5" />
+                    พบ {importResult.warnings.length} รายการที่มีรหัสนักเรียนถูกต้อง แต่ไม่พบข้อมูลในระบบ
                   </p>
-                  <div className="max-h-40 overflow-y-auto flex flex-col gap-1 mb-3">
+                  <div className="mb-3 flex max-h-40 flex-col gap-1 overflow-y-auto">
                     {importResult.warnings.map((w, i) => (
-                      <div key={i} className="text-xs bg-base-100 rounded px-2 py-1">
-                        <span className="font-mono font-semibold">{w.student_code}</span>
-                        {w.display_name && <span className="text-base-content/60 ml-1">({w.display_name})</span>}
-                        <span className="ml-2 text-warning">{w.reason}</span>
+                      <div key={i} className="rounded-lg bg-base-100 px-2 py-1 text-xs">
+                        <span className="font-mono font-semibold tabular-nums">{w.student_code}</span>
+                        {w.display_name && (
+                          <span className="ml-1 text-base-content/60">({w.display_name})</span>
+                        )}
+                        <span className="ml-2 text-[#8a6a00]">{w.reason}</span>
                       </div>
                     ))}
                   </div>
                   {forceResult?.ok ? (
-                    <p className="text-xs text-success font-semibold">✅ บันทึกแล้ว {forceResult.saved} รายการ</p>
+                    <p className="flex items-center gap-1.5 text-xs font-semibold text-success">
+                      <Icon name="checkCircle" size={14} />
+                      บันทึกแล้ว {forceResult.saved} รายการ
+                    </p>
                   ) : (
                     <>
                       {forceResult?.message && (
-                        <p className="text-xs text-error mb-1">{forceResult.message}</p>
+                        <p className="mb-1 text-xs text-error">{forceResult.message}</p>
                       )}
                       <button
-                        className={`btn btn-warning btn-sm w-full ${forceLoading ? 'loading' : ''}`}
+                        className="btn btn-primary btn-sm w-full gap-1.5"
                         disabled={forceLoading}
                         onClick={handleForceImport}
                       >
-                        {!forceLoading && '➕'} เพิ่มรายการเหล่านี้ลงระบบเลย
+                        {forceLoading ? (
+                          <span className="loading loading-spinner loading-xs" />
+                        ) : (
+                          <Icon name="plus" size={15} />
+                        )}
+                        เพิ่มรายการเหล่านี้ลงระบบเลย
                       </button>
                     </>
                   )}
@@ -697,13 +853,20 @@ export default function AdmissionStatusPage() {
               )}
             </>
           ) : (
-            <>
-              <h3 className="font-bold text-lg text-error">❌ Import ไม่สำเร็จ</h3>
-              <p className="mt-2 text-sm">{importResult?.message}</p>
-            </>
+            <div className="flex gap-3.5">
+              <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-error/10 text-error">
+                <Icon name="alert" size={20} />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-error">นำเข้าข้อมูลไม่สำเร็จ</h3>
+                <p className="mt-1 text-sm text-base-content/65">{importResult?.message}</p>
+              </div>
+            </div>
           )}
           <div className="modal-action">
-            <button className="btn btn-sm" onClick={() => importResultRef.current?.close()}>ปิด</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => importResultRef.current?.close()}>
+              ปิด
+            </button>
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { removeBackground } from '@imgly/background-removal';
+import Icon from './ui/Icon';
 
 // โหลด Blob เป็น HTMLImageElement
 function blobToImage(blob) {
@@ -159,24 +160,29 @@ export default function PhotoUploadDialog({ file, uploading, autoRemoveBg = fals
   };
 
   return (
-    <div className="modal modal-open">
+    <div className="modal modal-open" role="dialog" aria-modal="true" aria-label="ตรวจสอบรูปก่อนอัปโหลด">
       <div className="modal-box max-w-md">
-        <h3 className="font-bold text-lg mb-3">ตรวจสอบรูปก่อนอัปโหลด</h3>
+        <div className="mb-4 flex items-center gap-2.5">
+          <span className="gt-chip size-8">
+            <Icon name="image" size={16} />
+          </span>
+          <h3 className="text-base font-semibold">ตรวจสอบรูปก่อนอัปโหลด</h3>
+        </div>
 
         {/* Preview */}
-        <div className="flex justify-center mb-4">
+        <div className="mb-4 flex justify-center">
           <div
-            className="relative w-48 h-64 rounded-2xl overflow-hidden border border-base-300"
-            style={showProcessed ? checker : { background: '#e5e7eb' }}
+            className="relative h-64 w-48 overflow-hidden rounded-2xl border border-base-300"
+            style={showProcessed ? checker : { background: '#f1edf7' }}
           >
             <img
               src={showProcessed ? processedUrl : originalUrl}
-              alt="ตัวอย่างรูป"
-              className="absolute inset-0 w-full h-full"
+              alt="ตัวอย่างรูปที่จะอัปโหลด"
+              className="absolute inset-0 h-full w-full"
               style={{ objectFit: 'cover', objectPosition: 'center top' }}
             />
             {processing && (
-              <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2 text-white">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#1a102a]/65 text-white backdrop-blur-[1px]">
                 <span className="loading loading-spinner loading-md" />
                 <span className="text-xs">กำลังลบพื้นหลัง…</span>
               </div>
@@ -186,44 +192,62 @@ export default function PhotoUploadDialog({ file, uploading, autoRemoveBg = fals
 
         {/* Toggle — card style */}
         <label
-          className={`flex items-center justify-between gap-3 cursor-pointer rounded-xl border-2 p-3 transition-colors ${
+          className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 transition-colors ${
             removeBg
-              ? 'border-primary bg-primary/10'
-              : 'border-base-300 bg-base-100 hover:border-primary/50'
-          } ${(processing || uploading) ? 'opacity-60 cursor-not-allowed' : ''}`}
+              ? 'border-primary/40 bg-primary/8'
+              : 'border-base-300 bg-base-100 hover:border-primary/35 hover:bg-secondary/50'
+          } ${(processing || uploading) ? 'cursor-not-allowed opacity-60' : ''}`}
         >
-          <div className="flex items-center gap-3 min-w-0">
-            <span className="text-2xl shrink-0">✂️</span>
-            <div className="min-w-0">
-              <div className="font-semibold text-sm">ลบพื้นหลัง</div>
-              <div className="text-xs text-base-content/60">เหลือแต่ตัวนักเรียน</div>
-            </div>
-          </div>
+          <span className="flex min-w-0 items-center gap-3">
+            <span className={`gt-chip size-10 ${removeBg ? 'bg-primary text-primary-content' : ''}`}>
+              <Icon name="sparkle" size={19} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold">ลบพื้นหลัง</span>
+              <span className="block text-xs text-base-content/55">เหลือแต่ตัวนักเรียน</span>
+            </span>
+          </span>
           <input
             type="checkbox"
-            className="toggle toggle-primary toggle-lg shrink-0"
+            className="toggle toggle-primary shrink-0"
             checked={removeBg}
             disabled={processing || uploading}
             onChange={(e) => handleToggle(e.target.checked)}
           />
         </label>
-        <p className="text-xs text-base-content/60 mt-2 px-1">
+        <p className="mt-2 px-1 text-xs leading-relaxed text-base-content/55">
           ครั้งแรกอาจใช้เวลาสักครู่ (ดาวน์โหลดตัวประมวลผล) ทุกอย่างทำในเครื่องของคุณ รูปไม่ถูกส่งออกไปข้างนอก
         </p>
 
-        {error && <p className="text-error text-sm mt-2 px-1">{error}</p>}
+        <div aria-live="polite">
+          {error && (
+            <p className="mt-2 flex items-center gap-1.5 px-1 text-sm text-error">
+              <Icon name="alert" size={15} strokeWidth={2} />
+              {error}
+            </p>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="modal-action">
-          <button className="btn btn-ghost" onClick={onCancel} disabled={uploading || processing}>
+          <button className="btn btn-ghost btn-sm" onClick={onCancel} disabled={uploading || processing}>
             ยกเลิก
           </button>
-          <button className="btn btn-primary" onClick={handleConfirm} disabled={uploading || processing}>
-            {uploading ? <span className="loading loading-spinner loading-xs" /> : 'อัปโหลด'}
+          <button className="btn btn-primary btn-sm" onClick={handleConfirm} disabled={uploading || processing}>
+            {uploading ? (
+              <span className="loading loading-spinner loading-xs" />
+            ) : (
+              <Icon name="upload" size={15} />
+            )}
+            อัปโหลด
           </button>
         </div>
       </div>
-      <div className="modal-backdrop bg-black/40" onClick={uploading || processing ? undefined : onCancel} />
+      <button
+        className="modal-backdrop"
+        aria-label="ปิด"
+        onClick={uploading || processing ? undefined : onCancel}
+      />
     </div>
   );
 }

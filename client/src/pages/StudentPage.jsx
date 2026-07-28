@@ -4,21 +4,113 @@ import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import { resolveMediaUrl } from '../utils/mediaUrl';
 import PhotoUploadDialog from '../components/PhotoUploadDialog';
+import Icon from '../components/ui/Icon';
+import { Toast, EmptyState } from '../components/ui';
 
 // ── Custom Confirm Dialog ─────────────────────────────────────────────────────
-function ConfirmDialog({ open, title, message, confirmLabel = 'ยืนยัน', confirmClass = 'btn-error', onConfirm, onCancel }) {
+function ConfirmDialog({
+  open,
+  icon = 'alert',
+  tone = 'error',
+  title,
+  message,
+  confirmLabel = 'ยืนยัน',
+  confirmClass = 'btn-error',
+  onConfirm,
+  onCancel,
+}) {
+  // Esc ต้องปิดได้เสมอ — ไม่งั้นคนใช้คีย์บอร์ดติดอยู่ในกล่อง
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === 'Escape' && onCancel?.();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onCancel]);
+
   if (!open) return null;
+
+  const toneClass = {
+    error: 'bg-error/10 text-error',
+    success: 'bg-success/10 text-success',
+    warning: 'bg-[#F5C518]/20 text-[#8a6a00]',
+  }[tone];
+
   return (
-    <div className="modal modal-open">
+    <div className="modal modal-open" role="dialog" aria-modal="true">
       <div className="modal-box max-w-sm">
-        {title && <h3 className="font-bold text-lg mb-1">{title}</h3>}
-        <p className="text-base-content/70 text-sm">{message}</p>
-        <div className="modal-action mt-4">
+        <div className="flex gap-3.5">
+          <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${toneClass}`}>
+            <Icon name={icon} size={20} />
+          </span>
+          <div className="min-w-0">
+            {title && <h3 className="text-base font-semibold">{title}</h3>}
+            <p className="mt-1 text-sm text-base-content/65">{message}</p>
+          </div>
+        </div>
+        <div className="modal-action mt-5">
           <button className="btn btn-ghost btn-sm" onClick={onCancel}>ยกเลิก</button>
-          <button className={`btn btn-sm ${confirmClass}`} onClick={onConfirm}>{confirmLabel}</button>
+          <button className={`btn btn-sm ${confirmClass}`} onClick={onConfirm} autoFocus>
+            {confirmLabel}
+          </button>
         </div>
       </div>
-      <div className="modal-backdrop bg-black/40" onClick={onCancel} />
+      <button className="modal-backdrop" aria-label="ปิด" onClick={onCancel} />
+    </div>
+  );
+}
+
+// ── ช่องค้นหาแบบพิมพ์แล้วมีรายการให้เลือก ────────────────────────────────────
+function ComboField({ label, icon, placeholder, value, onChange, open, setOpen, items, renderItem, onPick, emptyText = 'ไม่พบรายการ' }) {
+  return (
+    <div className="relative">
+      <label className="label flex items-center gap-1.5">
+        <Icon name={icon} size={13} className="text-base-content/45" />
+        {label}
+      </label>
+      <input
+        className="input input-sm w-full"
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        autoComplete="off"
+      />
+      {open && (
+        <div className="absolute z-50 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-base-300 bg-base-100 py-1 shadow-lg">
+          {items.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-base-content/45">{emptyText}</p>
+          ) : (
+            items.map((it) => (
+              <button
+                type="button"
+                key={renderItem(it).key}
+                className="block w-full px-3 py-1.5 text-left text-sm leading-snug transition-colors hover:bg-secondary"
+                onMouseDown={() => onPick(it)}
+              >
+                {renderItem(it).node}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SelectField({ label, icon, value, onChange, options, placeholder }) {
+  return (
+    <div>
+      <label className="label flex items-center gap-1.5">
+        <Icon name={icon} size={13} className="text-base-content/45" />
+        {label}
+      </label>
+      <select className="select select-sm w-full" value={value} onChange={onChange}>
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -106,6 +198,7 @@ function AdmissionForm({ onSaved, onCancel }) {
       setGroupFields(list);
       if (list.length <= 1) setSelGroupField(list[0] || '');
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selFaculty]);
 
   // ── Level 5: Fields (เอก) — when group_field resolved ────────────────────
@@ -154,6 +247,7 @@ function AdmissionForm({ onSaved, onCancel }) {
       setProgTypes(list);
       if (list.length <= 1) setSelProgType(list[0] || '');
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selProgName]);
 
   const canSave = selUni && selFaculty && selProgName &&
@@ -163,7 +257,7 @@ function AdmissionForm({ onSaved, onCancel }) {
     (progTypes.length <= 1 || selProgType);
 
   const handleSave = async () => {
-    if (!canSave) { setError('กรุณาเลือกข้อมูลให้ครบ'); return; }
+    if (!canSave) { setError('กรุณาเลือกข้อมูลให้ครบทุกช่องก่อนกดเพิ่ม'); return; }
     setSaving(true); setError('');
     try {
       const params = { university_id: selUni, faculty: selFaculty, program_name: selProgName };
@@ -175,7 +269,7 @@ function AdmissionForm({ onSaved, onCancel }) {
       await api.post('/student/admissions', { program_id: prog.id });
       onSaved();
     } catch (err) {
-      setError(err.response?.data?.message || 'เกิดข้อผิดพลาด');
+      setError(err.response?.data?.message || 'เกิดข้อผิดพลาด ลองใหม่อีกครั้ง');
     } finally { setSaving(false); }
   };
 
@@ -191,156 +285,154 @@ function AdmissionForm({ onSaved, onCancel }) {
   );
 
   return (
-    <div className="flex flex-col gap-2 bg-base-200 rounded-xl p-3">
+    <div className="anim-scale-in flex flex-col gap-3 rounded-xl border border-base-300 bg-base-200/70 p-4">
+      <p className="text-xs text-base-content/55">
+        เลือกจากบนลงล่าง — ช่องถัดไปจะขึ้นให้เองเมื่อเลือกช่องก่อนหน้าแล้ว
+      </p>
+
       {/* 1. มหาวิทยาลัย */}
-      <div className="relative">
-        <label className="label py-0"><span className="label-text text-xs">🏛️ มหาวิทยาลัย</span></label>
-        <input
-          className="input input-bordered input-sm w-full"
-          placeholder="พิมพ์ชื่อเพื่อค้นหา..."
-          value={uniSearch}
-          onChange={e => { setUniSearch(e.target.value); setShowUniDrop(true); setSelUni(''); }}
-          onFocus={() => setShowUniDrop(true)}
-          onBlur={() => setTimeout(() => setShowUniDrop(false), 150)}
-        />
-        {showUniDrop && (
-          <div className="absolute z-50 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto mt-0.5">
-            {filteredUnis.length === 0
-              ? <div className="px-3 py-2 text-xs opacity-50">ไม่พบ</div>
-              : filteredUnis.map(u => (
-                <div key={u.id} className="px-3 py-1.5 text-sm hover:bg-base-200 cursor-pointer"
-                  onMouseDown={() => { setSelUni(String(u.id)); setUniSearch(u.name); setShowUniDrop(false); }}>
-                  <span className="font-medium">{u.name}</span>
-                  {u.short_name && <span className="text-xs opacity-50 ml-1">({u.short_name})</span>}
-                </div>
-              ))
-            }
-          </div>
-        )}
-      </div>
+      <ComboField
+        label="มหาวิทยาลัย"
+        icon="university"
+        placeholder="พิมพ์ชื่อเพื่อค้นหา..."
+        value={uniSearch}
+        onChange={e => { setUniSearch(e.target.value); setShowUniDrop(true); setSelUni(''); }}
+        open={showUniDrop}
+        setOpen={setShowUniDrop}
+        items={filteredUnis}
+        renderItem={(u) => ({
+          key: u.id,
+          node: (
+            <>
+              <span className="font-medium">{u.name}</span>
+              {u.short_name && <span className="ml-1 text-xs text-base-content/45">({u.short_name})</span>}
+            </>
+          ),
+        })}
+        onPick={(u) => { setSelUni(String(u.id)); setUniSearch(u.name); setShowUniDrop(false); }}
+      />
 
       {/* 2. วิทยาเขต — ถ้ามี >1 */}
       {selUni && campuses.length > 1 && (
-        <div>
-          <label className="label py-0"><span className="label-text text-xs">📍 วิทยาเขต</span></label>
-          <select className="select select-bordered select-sm w-full" value={selCampus}
-            onChange={e => setSelCampus(e.target.value)}>
-            <option value="">-- เลือกวิทยาเขต --</option>
-            {campuses.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
+        <SelectField
+          label="วิทยาเขต"
+          icon="pin"
+          value={selCampus}
+          onChange={e => setSelCampus(e.target.value)}
+          options={campuses}
+          placeholder="-- เลือกวิทยาเขต --"
+        />
       )}
 
       {/* 3. คณะ */}
       {faculties.length > 0 && (
-        <div className="relative">
-          <label className="label py-0"><span className="label-text text-xs">🏫 คณะ</span></label>
-          <input
-            className="input input-bordered input-sm w-full"
-            placeholder="พิมพ์ชื่อคณะ..."
-            value={facSearch}
-            onChange={e => { setFacSearch(e.target.value); setShowFacDrop(true); setSelFaculty(''); }}
-            onFocus={() => setShowFacDrop(true)}
-            onBlur={() => setTimeout(() => setShowFacDrop(false), 150)}
-          />
-          {showFacDrop && (
-            <div className="absolute z-50 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-48 overflow-y-auto mt-0.5">
-              {filteredFacs.length === 0
-                ? <div className="px-3 py-2 text-xs opacity-50">ไม่พบ</div>
-                : filteredFacs.map(f => (
-                  <div key={f} className="px-3 py-1.5 text-sm hover:bg-base-200 cursor-pointer"
-                    onMouseDown={() => { setSelFaculty(f); setFacSearch(f); setShowFacDrop(false); }}>
-                    {f}
-                  </div>
-                ))
-              }
-            </div>
-          )}
-        </div>
+        <ComboField
+          label="คณะ"
+          icon="faculty"
+          placeholder="พิมพ์ชื่อคณะ..."
+          value={facSearch}
+          onChange={e => { setFacSearch(e.target.value); setShowFacDrop(true); setSelFaculty(''); }}
+          open={showFacDrop}
+          setOpen={setShowFacDrop}
+          items={filteredFacs}
+          renderItem={(f) => ({ key: f, node: f })}
+          onPick={(f) => { setSelFaculty(f); setFacSearch(f); setShowFacDrop(false); }}
+        />
       )}
 
       {/* 4. กลุ่มสาขา (สาขา) — ถ้ามี >1 */}
       {selFaculty && groupFields.length > 1 && (
-        <div>
-          <label className="label py-0"><span className="label-text text-xs">📂 กลุ่มสาขา</span></label>
-          <select className="select select-bordered select-sm w-full" value={selGroupField}
-            onChange={e => setSelGroupField(e.target.value)}>
-            <option value="">-- เลือกกลุ่มสาขา --</option>
-            {groupFields.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-        </div>
+        <SelectField
+          label="กลุ่มสาขา"
+          icon="list"
+          value={selGroupField}
+          onChange={e => setSelGroupField(e.target.value)}
+          options={groupFields}
+          placeholder="-- เลือกกลุ่มสาขา --"
+        />
       )}
 
       {/* 5. เอก (field_name) — ถ้ามี >1 */}
       {selFaculty && fields.length > 1 && (groupFields.length <= 1 || selGroupField) && (
-        <div>
-          <label className="label py-0"><span className="label-text text-xs">🎯 เอก / วิชาเอก</span></label>
-          <select className="select select-bordered select-sm w-full" value={selField}
-            onChange={e => setSelField(e.target.value)}>
-            <option value="">-- เลือกวิชาเอก --</option>
-            {fields.map(f => <option key={f} value={f}>{f}</option>)}
-          </select>
-        </div>
+        <SelectField
+          label="เอก / วิชาเอก"
+          icon="star"
+          value={selField}
+          onChange={e => setSelField(e.target.value)}
+          options={fields}
+          placeholder="-- เลือกวิชาเอก --"
+        />
       )}
 
       {/* 6. หลักสูตร */}
       {progNames.length > 0 && (
-        <div className="relative">
-          <label className="label py-0"><span className="label-text text-xs">📋 หลักสูตร</span></label>
-          <input
-            className="input input-bordered input-sm w-full"
-            placeholder="พิมพ์ชื่อหลักสูตร..."
-            value={progSearch}
-            onChange={e => { setProgSearch(e.target.value); setShowProgDrop(true); setSelProgName(''); }}
-            onFocus={() => setShowProgDrop(true)}
-            onBlur={() => setTimeout(() => setShowProgDrop(false), 150)}
-          />
-          {showProgDrop && (
-            <div className="absolute z-50 w-full bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-52 overflow-y-auto mt-0.5">
-              {filteredProgs.length === 0
-                ? <div className="px-3 py-2 text-xs opacity-50">ไม่พบ</div>
-                : filteredProgs.map(p => (
-                  <div key={p} className="px-3 py-1.5 text-sm hover:bg-base-200 cursor-pointer leading-snug"
-                    onMouseDown={() => { setSelProgName(p); setProgSearch(p); setShowProgDrop(false); }}>
-                    {p}
-                  </div>
-                ))
-              }
-            </div>
-          )}
-        </div>
+        <ComboField
+          label="หลักสูตร"
+          icon="clipboard"
+          placeholder="พิมพ์ชื่อหลักสูตร..."
+          value={progSearch}
+          onChange={e => { setProgSearch(e.target.value); setShowProgDrop(true); setSelProgName(''); }}
+          open={showProgDrop}
+          setOpen={setShowProgDrop}
+          items={filteredProgs}
+          renderItem={(p) => ({ key: p, node: p })}
+          onPick={(p) => { setSelProgName(p); setProgSearch(p); setShowProgDrop(false); }}
+        />
       )}
 
       {/* 7. โปรแกรม (program_type) — ถ้ามี >1 */}
       {selProgName && progTypes.length > 1 && (
-        <div>
-          <label className="label py-0"><span className="label-text text-xs">🔖 โปรแกรม / ประเภท</span></label>
-          <select className="select select-bordered select-sm w-full" value={selProgType}
-            onChange={e => setSelProgType(e.target.value)}>
-            <option value="">-- เลือกโปรแกรม --</option>
-            {progTypes.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </div>
+        <SelectField
+          label="โปรแกรม / ประเภท"
+          icon="file"
+          value={selProgType}
+          onChange={e => setSelProgType(e.target.value)}
+          options={progTypes}
+          placeholder="-- เลือกโปรแกรม --"
+        />
       )}
 
-      {/* Preview summary */}
+      {/* สรุปก่อนบันทึก */}
       {canSave && (
-        <div className="bg-success/10 rounded-lg px-3 py-2 text-xs space-y-0.5 border border-success/30">
-          <div className="font-semibold text-sm">{uniSearch}</div>
-          {selCampus && <div className="text-base-content/60">📍 {selCampus}</div>}
-          <div className="text-base-content/70">{selFaculty}</div>
-          {selGroupField && <div className="text-base-content/60">{selGroupField}{selField ? ` › ${selField}` : ''}</div>}
-          {!selGroupField && selField && <div className="text-base-content/60">{selField}</div>}
-          <div className="font-medium text-base-content/90 leading-snug">{selProgName}</div>
-          {selProgType && <span className="badge badge-xs badge-outline">{selProgType}</span>}
+        <div className="anim-scale-in rounded-xl border border-success/30 bg-success/10 p-3">
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-success">
+            <Icon name="checkCircle" size={13} strokeWidth={2} />
+            รายการที่จะเพิ่ม
+          </p>
+          <p className="text-sm font-semibold">{uniSearch}</p>
+          {selCampus && (
+            <p className="flex items-center gap-1 text-xs text-base-content/55">
+              <Icon name="pin" size={12} />
+              {selCampus}
+            </p>
+          )}
+          <p className="text-xs text-base-content/70">{selFaculty}</p>
+          {(selGroupField || selField) && (
+            <p className="text-xs text-base-content/55">
+              {[selGroupField, selField].filter(Boolean).join(' › ')}
+            </p>
+          )}
+          <p className="mt-0.5 text-xs font-medium leading-snug">{selProgName}</p>
+          {selProgType && <span className="badge badge-xs badge-ghost mt-1">{selProgType}</span>}
         </div>
       )}
 
-      {error && <p className="text-error text-xs">{error}</p>}
-      <div className="flex gap-2 justify-end mt-1">
-        <button className="btn btn-ghost btn-sm" onClick={onCancel} disabled={saving}>ยกเลิก</button>
+      <div aria-live="polite">
+        {error && (
+          <p className="flex items-center gap-1.5 text-xs text-error">
+            <Icon name="alert" size={13} strokeWidth={2} />
+            {error}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-1 flex justify-end gap-2">
+        <button className="btn btn-ghost btn-sm" onClick={onCancel} disabled={saving}>
+          ยกเลิก
+        </button>
         <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving || !canSave}>
-          {saving && <span className="loading loading-spinner loading-xs" />} เพิ่ม
+          {saving ? <span className="loading loading-spinner loading-xs" /> : <Icon name="plus" size={15} />}
+          เพิ่มรายการ
         </button>
       </div>
     </div>
@@ -370,9 +462,9 @@ export default function StudentPage() {
   };
 
   // ── Confirm Dialog ──
-  const [dialog, setDialog] = useState(null); // { title, message, confirmLabel, confirmClass, onConfirm }
+  const [dialog, setDialog] = useState(null);
   const openDialog = useCallback((opts) => setDialog(opts), []);
-  const closeDialog = () => setDialog(null);
+  const closeDialog = useCallback(() => setDialog(null), []);
 
   // ── Admission ──
   const [admissions, setAdmissions] = useState([]);
@@ -396,14 +488,16 @@ export default function StudentPage() {
   const handleAdmissionSaved = () => {
     setShowAddForm(false);
     loadAdmissions();
-    showToast('เพิ่มมหาวิทยาลัยแล้ว ✅');
+    showToast('เพิ่มมหาวิทยาลัยเรียบร้อยแล้ว');
   };
 
   const handleDelete = (id) => {
     openDialog({
-      title: '🗑️ ลบรายการ',
-      message: 'ต้องการลบมหาวิทยาลัยนี้ออกจากรายการ?',
-      confirmLabel: 'ลบ',
+      icon: 'trash',
+      tone: 'error',
+      title: 'ลบรายการนี้',
+      message: 'มหาวิทยาลัยนี้จะถูกลบออกจากรายการของคุณ เพิ่มใหม่ได้ภายหลัง',
+      confirmLabel: 'ลบรายการ',
       confirmClass: 'btn-error',
       onConfirm: async () => {
         closeDialog();
@@ -411,9 +505,9 @@ export default function StudentPage() {
         try {
           await api.delete(`/student/admissions/${id}`);
           loadAdmissions();
-          showToast('ลบแล้ว');
+          showToast('ลบรายการแล้ว');
         } catch (err) {
-          showToast(err.response?.data?.message || 'ลบไม่สำเร็จ', 'error');
+          showToast(err.response?.data?.message || 'ลบไม่สำเร็จ ลองใหม่อีกครั้ง', 'error');
         } finally { setDeletingId(null); }
       },
     });
@@ -421,7 +515,9 @@ export default function StudentPage() {
 
   const handleConfirm = (id) => {
     openDialog({
-      title: '🎓 ยืนยันสิทธิ์',
+      icon: 'graduation',
+      tone: 'success',
+      title: 'ยืนยันสิทธิ์',
       message: 'ต้องการยืนยันสิทธิ์ที่มหาวิทยาลัยนี้? ยังสามารถยกเลิกได้ภายหลัง',
       confirmLabel: 'ยืนยันสิทธิ์',
       confirmClass: 'btn-success',
@@ -431,7 +527,7 @@ export default function StudentPage() {
         try {
           await api.post(`/student/admissions/${id}/confirm`);
           loadAdmissions();
-          showToast('ยืนยันสิทธิ์เรียบร้อยแล้ว 🎉');
+          showToast('ยืนยันสิทธิ์เรียบร้อยแล้ว');
         } catch (err) {
           showToast(err.response?.data?.message || 'เกิดข้อผิดพลาด', 'error');
         } finally { setConfirmingId(null); }
@@ -441,9 +537,11 @@ export default function StudentPage() {
 
   const handleUnconfirm = (id) => {
     openDialog({
-      title: '↩️ ยกเลิกการยืนยัน',
-      message: 'ต้องการยกเลิกการยืนยันสิทธิ์?',
-      confirmLabel: 'ยกเลิกยืนยัน',
+      icon: 'undo',
+      tone: 'warning',
+      title: 'ยกเลิกการยืนยันสิทธิ์',
+      message: 'รายการนี้จะกลับไปเป็นสถานะยังไม่ยืนยัน และยืนยันใหม่ได้',
+      confirmLabel: 'ยกเลิกการยืนยัน',
       confirmClass: 'btn-warning',
       onConfirm: async () => {
         closeDialog();
@@ -458,6 +556,7 @@ export default function StudentPage() {
       },
     });
   };
+
   const handleSaveQuote = async () => {
     setSavingQuote(true);
     try {
@@ -465,9 +564,9 @@ export default function StudentPage() {
       const updated = { ...user, quote };
       login(updated, localStorage.getItem('token'));
       setEditingQuote(false);
-      showToast('บันทึกคำคมสำเร็จ ✨');
+      showToast('บันทึกคำคมแล้ว');
     } catch {
-      showToast('บันทึกไม่สำเร็จ', 'error');
+      showToast('บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง', 'error');
     } finally {
       setSavingQuote(false);
     }
@@ -490,10 +589,10 @@ export default function StudentPage() {
       });
       setPhotoUrl(res.data.photo_url);
       login({ ...user, photo_url: res.data.photo_url }, localStorage.getItem('token'));
-      showToast('อัปโหลดรูปสำเร็จ 🎉');
+      showToast('อัปโหลดรูปเรียบร้อยแล้ว');
       setPendingPhoto(null);
     } catch {
-      showToast('อัปโหลดรูปไม่สำเร็จ', 'error');
+      showToast('อัปโหลดรูปไม่สำเร็จ ลองใหม่อีกครั้ง', 'error');
     } finally {
       setUploadingPhoto(false);
     }
@@ -501,8 +600,10 @@ export default function StudentPage() {
 
   const deletePhoto = () => {
     openDialog({
+      icon: 'trash',
+      tone: 'error',
       title: 'ลบรูปโปรไฟล์',
-      message: 'ต้องการลบรูปนี้ใช่หรือไม่?',
+      message: 'ต้องการลบรูปนี้ใช่หรือไม่? อัปโหลดใหม่ได้ตลอด',
       confirmLabel: 'ลบรูป',
       confirmClass: 'btn-error',
       onConfirm: async () => {
@@ -525,10 +626,11 @@ export default function StudentPage() {
   const handleLogout = () => { logout(); navigate('/login'); };
 
   return (
-    <div className="min-h-screen bg-base-200">
-      {/* Confirm Dialog */}
+    <div className="min-h-dvh bg-base-200">
       <ConfirmDialog
         open={!!dialog}
+        icon={dialog?.icon}
+        tone={dialog?.tone}
         title={dialog?.title}
         message={dialog?.message}
         confirmLabel={dialog?.confirmLabel}
@@ -546,228 +648,318 @@ export default function StudentPage() {
         onConfirm={uploadPhotoFile}
       />
 
-      {/* Toast */}
-      {toast && (
-        <div className="toast toast-top toast-end z-50">
-          <div className={`alert ${toast.type === 'error' ? 'alert-error' : 'alert-success'} shadow-lg`}>
-            <span>{toast.msg}</span>
-          </div>
-        </div>
-      )}
+      <Toast toast={toast} />
 
-      {/* Navbar */}
-      <div className="navbar bg-base-100 shadow-sm px-4">
-        <div className="flex-1">
-          <span className="font-bold text-lg">🎓 GradTrack</span>
+      {/* ── Topbar ─────────────────────────────────────────── */}
+      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-base-300 bg-base-100/80 px-4 backdrop-blur-md sm:px-6">
+        <span className="grid size-9 place-items-center rounded-lg bg-primary text-primary-content">
+          <Icon name="graduation" size={19} strokeWidth={1.9} />
+        </span>
+        <div className="min-w-0 leading-tight">
+          <p className="truncate text-sm font-bold tracking-tight">GradTrack</p>
+          <p className="truncate text-[11px] text-base-content/50">โรงเรียนสุคนธีรวิทย์</p>
         </div>
-        <div className="flex-none gap-2">
-          <span className="text-sm text-base-content/60 hidden sm:block">
-            {user?.class_level} ห้อง {user?.class_room}
-          </span>
-          <button className="btn btn-ghost btn-sm" onClick={handleLogout}>ออกจากระบบ</button>
-        </div>
-      </div>
+        <span className="ml-auto hidden text-xs text-base-content/55 sm:block">
+          {user?.class_level} ห้อง {user?.class_room}
+        </span>
+        <button className="btn btn-ghost btn-sm gap-1.5" onClick={handleLogout}>
+          <Icon name="logout" size={16} />
+          <span className="max-sm:hidden">ออกจากระบบ</span>
+        </button>
+      </header>
 
-      {/* Content */}
-      <div className="max-w-lg mx-auto px-4 py-10 flex flex-col items-center gap-6">
+      <div className="mx-auto flex max-w-2xl flex-col gap-5 px-4 py-6 sm:py-8">
 
-        {/* Photo */}
-        <div className="relative">
-          <div className="avatar cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-            <div className="w-28 h-40 rounded-2xl ring ring-primary ring-offset-base-100 ring-offset-2 overflow-hidden bg-base-300 flex items-center justify-center">
-              {photoUrl
-                ? <img src={resolveMediaUrl(photoUrl)} alt="รูปโปรไฟล์" className="w-full h-full object-cover" />
-                : <span className="text-5xl">🧑‍🎓</span>}
-            </div>
-          </div>
-          <button
-            className="absolute bottom-1 right-1 btn btn-circle btn-sm btn-primary shadow"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadingPhoto}
-            title="เปลี่ยนรูปโปรไฟล์"
-          >
-            {uploadingPhoto ? <span className="loading loading-spinner loading-xs" /> : '📷'}
-          </button>
-          {photoUrl && (
-            <button
-              className="absolute bottom-1 left-1 btn btn-circle btn-sm btn-error shadow"
-              onClick={deletePhoto}
-              disabled={uploadingPhoto}
-              title="ลบรูปโปรไฟล์"
-            >
-              🗑️
-            </button>
-          )}
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoChange} />
-        </div>
+        {/* ── การ์ดโปรไฟล์ ───────────────────────────────── */}
+        <section className="card anim-fade-up overflow-hidden bg-base-100">
+          <div className="gt-band h-24 rounded-none" />
+          <div className="flex flex-col items-center px-5 pb-5 text-center sm:flex-row sm:items-end sm:gap-5 sm:text-left">
+            <div className="relative -mt-14 shrink-0">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="block size-28 overflow-hidden rounded-2xl bg-base-200 ring-4 ring-base-100 transition-transform hover:scale-[1.02] sm:h-36 sm:w-28"
+                aria-label="เปลี่ยนรูปโปรไฟล์"
+              >
+                {photoUrl ? (
+                  <img
+                    src={resolveMediaUrl(photoUrl)}
+                    alt="รูปโปรไฟล์ของคุณ"
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <span className="grid size-full place-items-center text-base-content/30">
+                    <Icon name="user" size={40} />
+                  </span>
+                )}
+              </button>
 
-        {/* Name */}
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">{user?.title_prefix}{user?.first_name} {user?.last_name}</h1>
-          <p className="text-base-content/50 text-sm mt-1">
-            รหัส {user?.username} · {user?.class_level} ห้อง {user?.class_room}
-          </p>
-        </div>
+              <button
+                className="btn btn-circle btn-primary btn-sm absolute -bottom-1 -right-1 shadow-md"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingPhoto}
+                aria-label="เปลี่ยนรูปโปรไฟล์"
+              >
+                {uploadingPhoto ? (
+                  <span className="loading loading-spinner loading-xs" />
+                ) : (
+                  <Icon name="camera" size={16} />
+                )}
+              </button>
 
-        {/* ── Admission Card ── */}
-        <div className="card bg-base-100 shadow w-full">
-          <div className="card-body gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="card-title text-base">🏫 ผลการสอบคัดเลือก</h2>
-              {!hasConfirmed && (
+              {photoUrl && (
                 <button
-                  className="btn btn-ghost btn-xs"
-                  onClick={() => setShowAddForm(v => !v)}
+                  className="btn btn-circle btn-sm absolute -bottom-1 -left-1 border-base-300 bg-base-100 text-error shadow-md hover:bg-error hover:text-error-content"
+                  onClick={deletePhoto}
+                  disabled={uploadingPhoto}
+                  aria-label="ลบรูปโปรไฟล์"
                 >
-                  {showAddForm ? '✕ ปิด' : '+ เพิ่ม'}
+                  <Icon name="trash" size={15} />
                 </button>
               )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
             </div>
 
-            {/* ฟอร์มเพิ่มใหม่ */}
-            {showAddForm && (
+            <div className="mt-3 min-w-0 flex-1 sm:mt-0 sm:pb-2">
+              <h1 className="truncate text-xl font-semibold tracking-tight">
+                {user?.title_prefix}{user?.first_name} {user?.last_name}
+              </h1>
+              <p className="mt-1 text-sm text-base-content/55">
+                รหัส <span className="font-mono tabular-nums">{user?.username}</span> ·{' '}
+                {user?.class_level} ห้อง {user?.class_room}
+              </p>
+              {hasConfirmed && (
+                <span className="badge badge-sm badge-soft-success mt-2 gap-1">
+                  <Icon name="checkCircle" size={12} strokeWidth={2} />
+                  ยืนยันสิทธิ์แล้ว
+                </span>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ── ผลการสอบคัดเลือก ───────────────────────────── */}
+        <section className="card anim-fade-up bg-base-100 p-5" style={{ '--anim-delay': '0.06s' }}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="gt-chip size-8">
+                <Icon name="university" size={16} />
+              </span>
+              <h2 className="text-base font-semibold">ผลการสอบคัดเลือก</h2>
+            </div>
+            {!hasConfirmed && (
+              <button
+                className={`btn btn-sm gap-1.5 ${showAddForm ? 'btn-ghost' : 'btn-primary'}`}
+                onClick={() => setShowAddForm(v => !v)}
+              >
+                <Icon name={showAddForm ? 'x' : 'plus'} size={15} />
+                {showAddForm ? 'ปิด' : 'เพิ่ม'}
+              </button>
+            )}
+          </div>
+
+          {showAddForm && (
+            <div className="mb-4">
               <AdmissionForm
                 onSaved={handleAdmissionSaved}
                 onCancel={() => setShowAddForm(false)}
               />
-            )}
-
-            {loadingAdmissions ? (
-              <div className="flex justify-center py-4">
-                <span className="loading loading-spinner loading-md" />
-              </div>
-            ) : admissions.length === 0 ? (
-              <p className="text-base-content/30 text-sm italic">
-                ยังไม่มีรายการ — กด + เพิ่ม เพื่อบันทึกผลสอบติด
-              </p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {admissions.map(a => (
-                  <div
-                    key={a.id}
-                    className={`flex items-center gap-3 rounded-xl p-3 ${a.confirmed ? 'bg-success/10 ring-1 ring-success' : 'bg-base-200'}`}
-                  >
-                    {/* Logo */}
-                    <div className="w-10 h-10 flex-shrink-0">
-                      {a.logo_url
-                        ? <img src={resolveMediaUrl(a.logo_url)} alt="" className="w-10 h-10 object-contain rounded" />
-                        : <div className="w-10 h-10 bg-base-300 rounded flex items-center justify-center text-lg">🏛️</div>}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm truncate">{a.university_name}</p>
-                      {a.campus && <p className="text-xs text-base-content/50 truncate">📍 {a.campus}</p>}
-                      <p className="text-xs text-base-content/60 truncate">{a.faculty_name}</p>
-                      {(a.group_field || a.field_name_th) && (
-                        <p className="text-xs text-base-content/50 truncate">
-                          {[a.group_field, a.field_name_th].filter(Boolean).join(' › ')}
-                        </p>
-                      )}
-                      <p className="text-xs text-base-content/80 truncate font-medium leading-snug">{a.program_name_th}</p>
-                      {a.program_type && (
-                        <span className="badge badge-xs badge-outline opacity-60 mt-0.5">{a.program_type}</span>
-                      )}
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex-shrink-0 flex items-center gap-1">
-                      {a.confirmed ? (
-                        <>
-                          <span className="badge badge-success badge-sm gap-1">✅ ยืนยันแล้ว</span>
-                          <button
-                            className="btn btn-ghost btn-xs text-warning"
-                            onClick={() => handleUnconfirm(a.id)}
-                            disabled={confirmingId === a.id}
-                            title="ยกเลิกการยืนยัน"
-                          >
-                            {confirmingId === a.id
-                              ? <span className="loading loading-spinner loading-xs" />
-                              : '↩️'}
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btn btn-success btn-xs"
-                            onClick={() => handleConfirm(a.id)}
-                            disabled={confirmingId === a.id || hasConfirmed}
-                            title="ยืนยันสิทธิ์ที่นี่"
-                          >
-                            {confirmingId === a.id
-                              ? <span className="loading loading-spinner loading-xs" />
-                              : '🎓 ยืนยัน'}
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-xs text-error"
-                            onClick={() => handleDelete(a.id)}
-                            disabled={deletingId === a.id}
-                            title="ลบรายการนี้"
-                          >
-                            {deletingId === a.id
-                              ? <span className="loading loading-spinner loading-xs" />
-                              : '🗑️'}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Quote Card ── */}
-        <div className="card bg-base-100 shadow w-full">
-          <div className="card-body gap-3">
-            <div className="flex items-center justify-between">
-              <h2 className="card-title text-base">💬 คำคมของฉัน</h2>
-              {!editingQuote && (
-                <button className="btn btn-ghost btn-xs" onClick={() => setEditingQuote(true)}>
-                  ✏️ แก้ไข
-                </button>
-              )}
             </div>
+          )}
 
-            {editingQuote ? (
-              <>
-                <textarea
-                  className="textarea textarea-bordered w-full resize-none"
-                  rows={4}
-                  maxLength={300}
-                  placeholder="เขียนคำคม คติประจำใจ หรือความฝันของคุณ..."
-                  value={quote}
-                  onChange={e => setQuote(e.target.value)}
-                  autoFocus
-                />
-                <p className="text-xs text-base-content/40 text-right">{quote.length}/300</p>
-                <div className="flex gap-2 justify-end">
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => { setQuote(user?.quote || ''); setEditingQuote(false); }}
-                    disabled={savingQuote}
-                  >ยกเลิก</button>
-                  <button className="btn btn-primary btn-sm" onClick={handleSaveQuote} disabled={savingQuote}>
-                    {savingQuote && <span className="loading loading-spinner loading-sm" />}
-                    บันทึก
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="text-base-content/70 italic whitespace-pre-wrap min-h-[3rem]">
-                {quote || (
-                  <span className="text-base-content/30 not-italic">
-                    ยังไม่มีคำคม — กด แก้ไข เพื่อเพิ่ม
+          {loadingAdmissions ? (
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-xl bg-base-200 p-3">
+                  <span className="gt-skeleton size-10 rounded-lg" />
+                  <span className="flex-1">
+                    <span className="gt-skeleton mb-1.5 block h-3 w-2/5" />
+                    <span className="gt-skeleton block h-2.5 w-3/5" />
                   </span>
-                )}
-              </p>
+                </div>
+              ))}
+            </div>
+          ) : admissions.length === 0 ? (
+            <EmptyState
+              icon="university"
+              title="ยังไม่มีรายการ"
+              hint="กดปุ่ม เพิ่ม ด้านบน เพื่อบันทึกมหาวิทยาลัยที่สอบติด"
+              className="py-8"
+            />
+          ) : (
+            <ul className="stagger-children flex flex-col gap-2.5">
+              {admissions.map((a, idx) => (
+                <li
+                  key={a.id}
+                  style={{ '--i': idx }}
+                  className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+                    a.confirmed
+                      ? 'border-success/35 bg-success/8'
+                      : 'border-base-300 bg-base-200/60'
+                  }`}
+                >
+                  <div className="size-10 shrink-0">
+                    {a.logo_url ? (
+                      <img
+                        src={resolveMediaUrl(a.logo_url)}
+                        alt=""
+                        width="40"
+                        height="40"
+                        loading="lazy"
+                        className="size-10 rounded-lg bg-base-100 object-contain p-0.5"
+                      />
+                    ) : (
+                      <span className="gt-chip size-10">
+                        <Icon name="university" size={19} />
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{a.university_name}</p>
+                    {a.campus && (
+                      <p className="flex items-center gap-1 truncate text-xs text-base-content/50">
+                        <Icon name="pin" size={11} />
+                        {a.campus}
+                      </p>
+                    )}
+                    <p className="truncate text-xs text-base-content/60">{a.faculty_name}</p>
+                    {(a.group_field || a.field_name_th) && (
+                      <p className="truncate text-xs text-base-content/50">
+                        {[a.group_field, a.field_name_th].filter(Boolean).join(' › ')}
+                      </p>
+                    )}
+                    <p className="truncate text-xs font-medium leading-snug text-base-content/85">
+                      {a.program_name_th}
+                    </p>
+                    {a.program_type && (
+                      <span className="badge badge-xs badge-ghost mt-1">{a.program_type}</span>
+                    )}
+                  </div>
+
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    {a.confirmed ? (
+                      <>
+                        <span className="badge badge-sm badge-soft-success gap-1">
+                          <Icon name="checkCircle" size={12} strokeWidth={2} />
+                          ยืนยันแล้ว
+                        </span>
+                        <button
+                          className="btn btn-ghost btn-xs gap-1 text-[#8a6a00]"
+                          onClick={() => handleUnconfirm(a.id)}
+                          disabled={confirmingId === a.id}
+                        >
+                          {confirmingId === a.id ? (
+                            <span className="loading loading-spinner loading-xs" />
+                          ) : (
+                            <Icon name="undo" size={13} />
+                          )}
+                          ยกเลิก
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className="btn btn-success btn-xs gap-1"
+                          onClick={() => handleConfirm(a.id)}
+                          disabled={confirmingId === a.id || hasConfirmed}
+                          title={hasConfirmed ? 'ยืนยันสิทธิ์ได้ที่เดียวเท่านั้น' : 'ยืนยันสิทธิ์ที่นี่'}
+                        >
+                          {confirmingId === a.id ? (
+                            <span className="loading loading-spinner loading-xs" />
+                          ) : (
+                            <Icon name="check" size={13} strokeWidth={2.2} />
+                          )}
+                          ยืนยันสิทธิ์
+                        </button>
+                        <button
+                          className="btn btn-ghost btn-xs gap-1 text-error"
+                          onClick={() => handleDelete(a.id)}
+                          disabled={deletingId === a.id}
+                        >
+                          {deletingId === a.id ? (
+                            <span className="loading loading-spinner loading-xs" />
+                          ) : (
+                            <Icon name="trash" size={13} />
+                          )}
+                          ลบ
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* ── คำคม ───────────────────────────────────────── */}
+        <section className="card anim-fade-up bg-base-100 p-5" style={{ '--anim-delay': '0.12s' }}>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <span className="gt-chip size-8">
+                <Icon name="sparkle" size={16} />
+              </span>
+              <h2 className="text-base font-semibold">คำคมของฉัน</h2>
+            </div>
+            {!editingQuote && (
+              <button className="btn btn-ghost btn-sm gap-1.5" onClick={() => setEditingQuote(true)}>
+                <Icon name="edit" size={15} />
+                แก้ไข
+              </button>
             )}
           </div>
-        </div>
 
+          {editingQuote ? (
+            <>
+              <textarea
+                className="textarea w-full resize-none"
+                rows={4}
+                maxLength={300}
+                placeholder="เขียนคำคม คติประจำใจ หรือความฝันของคุณ..."
+                value={quote}
+                onChange={e => setQuote(e.target.value)}
+                autoFocus
+              />
+              <p className="mt-1 text-right text-xs tabular-nums text-base-content/40">
+                {quote.length}/300
+              </p>
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => { setQuote(user?.quote || ''); setEditingQuote(false); }}
+                  disabled={savingQuote}
+                >
+                  ยกเลิก
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={handleSaveQuote} disabled={savingQuote}>
+                  {savingQuote ? (
+                    <span className="loading loading-spinner loading-xs" />
+                  ) : (
+                    <Icon name="save" size={15} />
+                  )}
+                  บันทึก
+                </button>
+              </div>
+            </>
+          ) : quote ? (
+            <blockquote className="border-l-2 border-[#F5C518] pl-4 text-sm italic leading-relaxed text-base-content/75 whitespace-pre-wrap">
+              {quote}
+            </blockquote>
+          ) : (
+            <p className="text-sm text-base-content/40">
+              ยังไม่มีคำคม — กด แก้ไข เพื่อเพิ่มข้อความประจำตัวของคุณ
+            </p>
+          )}
+        </section>
       </div>
     </div>
   );
 }
-

@@ -3,12 +3,16 @@ import * as XLSX from 'xlsx';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../../utils/api';
 import { withBase } from '../../utils/withBase';
+import Icon from '../../components/ui/Icon';
+import { PageHeader } from '../../components/ui';
 
+// จานสีกราฟ: ไล่จากสีหลักของแบรนด์ (ม่วง → ทอง → เขียว → น้ำเงิน → แดง) แล้ววนโทนใกล้เคียง
+// เรียงให้สีที่อยู่ติดกันต่างกันชัด เพราะ pie chart วางชิ้นติดกัน
 const PIE_COLORS = [
-  '#6366f1','#f59e0b','#10b981','#3b82f6','#ef4444','#8b5cf6',
-  '#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16','#a855f7',
-  '#e11d48','#0ea5e9','#d97706','#059669','#7c3aed','#db2777',
-  '#2563eb','#16a34a',
+  '#5b2d8e','#f5c518','#16a34a','#1e2a5e','#dc2626','#7a3fc0',
+  '#c79b00','#0d9488','#3b5bb5','#b91c1c','#9b6ad4','#8a6a00',
+  '#15803d','#2563eb','#e11d48','#a855f7','#d97706','#059669',
+  '#1d4ed8','#f472b6',
 ];
 
 const THAI_MONTHS = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
@@ -38,22 +42,46 @@ function ThaiDatePicker({ value, onChange }) {
 
   return (
     <div className="flex gap-1">
-      <select className="select select-bordered select-sm w-16"
+      <select className="select select-sm w-16"
+        aria-label="วัน"
         value={local.day} onChange={e => handleChange('day', Number(e.target.value))}>
         <option value="">วัน</option>
         {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
       </select>
-      <select className="select select-bordered select-sm w-[4.5rem]"
+      <select className="select select-sm w-[4.5rem]"
+        aria-label="เดือน"
         value={local.month} onChange={e => handleChange('month', Number(e.target.value))}>
         <option value="">เดือน</option>
         {THAI_MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
       </select>
-      <select className="select select-bordered select-sm w-24"
+      <select className="select select-sm w-24"
+        aria-label="ปี พ.ศ."
         value={local.year} onChange={e => handleChange('year', Number(e.target.value))}>
         <option value="">ปี พ.ศ.</option>
         {THAI_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
       </select>
     </div>
+  );
+}
+
+// ตารางสรุปตัวเลขในกราฟ — คนอ่านหน้าจอ/คนตาบอดสีต้องได้ข้อมูลเท่ากับคนที่เห็นสี
+function ChartLegend({ data, total, colors, scroll = false }) {
+  return (
+    <ul className={`flex flex-col gap-1 ${scroll ? 'max-h-80 overflow-y-auto' : 'mt-2'}`}>
+      {data.map((d, i) => (
+        <li key={d.name} className="flex items-center gap-2 text-xs">
+          <span
+            className="size-3 shrink-0 rounded-full"
+            style={{ background: colors[i % colors.length] }}
+          />
+          <span className="flex-1 truncate">{d.name}</span>
+          <span className="whitespace-nowrap font-semibold tabular-nums">{d.value} รายการ</span>
+          <span className="whitespace-nowrap tabular-nums text-base-content/50">
+            ({((d.value / total) * 100).toFixed(1)}%)
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -242,69 +270,78 @@ export default function AdmissionTableReportPage() {
         }
       `}</style>
 
-      <div className="p-4 flex flex-col gap-4 min-w-0 overflow-hidden">
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 no-print">
-          <h1 className="text-xl font-bold">📋 รายงานผลการสอบ (ตาราง)</h1>
-          <select
-            className="select select-bordered select-sm"
-            value={yearId}
-            onChange={e => {
-              const y = years.find(y => String(y.id) === e.target.value);
-              setYearId(e.target.value);
-              setYearName(y ? String(y.year_be || y.title || y.name || '') : '');
-            }}
+      <div className="flex min-w-0 flex-col overflow-hidden">
+        <div className="no-print">
+          <PageHeader
+            icon="table"
+            title="รายงานผลการสอบ (ตาราง)"
+            subtitle="สรุปผลทั้งชั้นปี พร้อมส่งออกเป็น Excel / PDF และดูกราฟภาพรวม"
           >
-            {years.map(y => (
-              <option key={y.id} value={y.id}>
-                ปีการศึกษา {y.year_be || y.title || y.name}
-              </option>
-            ))}
-          </select>
+            <label htmlFor="report-year" className="whitespace-nowrap text-xs text-base-content/55">
+              ปีการศึกษา
+            </label>
+            <select
+              id="report-year"
+              className="select select-sm"
+              value={yearId}
+              onChange={e => {
+                const y = years.find(y => String(y.id) === e.target.value);
+                setYearId(e.target.value);
+                setYearName(y ? String(y.year_be || y.title || y.name || '') : '');
+              }}
+            >
+              {years.map(y => (
+                <option key={y.id} value={y.id}>
+                  {y.year_be || y.title || y.name}
+                </option>
+              ))}
+            </select>
+          </PageHeader>
         </div>
 
-        {/* Stats + Filter + Actions — one card */}
-        <div className="card bg-base-100 shadow border border-base-300 no-print">
-          {/* Stats row */}
-          <div className="flex divide-x divide-base-300 border-b border-base-300">
-            <div className="flex-1 px-4 py-3 text-center">
-              <div className="text-xs text-base-content/50">นักเรียนทั้งหมด</div>
-              <div className="text-xl font-bold text-primary">{totalStudents}</div>
-            </div>
-            <div className="flex-1 px-4 py-3 text-center">
-              <div className="text-xs text-base-content/50">{isFiltered ? 'บันทึกในช่วงนี้' : 'บันทึกมหาลัยแล้ว'}</div>
-              <div className="text-xl font-bold text-info">{withAdmissions}</div>
-            </div>
-            <div className="flex-1 px-4 py-3 text-center">
-              <div className="text-xs text-base-content/50">ยืนยันสิทธิ์แล้ว</div>
-              <div className="text-xl font-bold text-success">{confirmed}</div>
-            </div>
-            <div className="flex-1 px-4 py-3 text-center">
-              <div className="text-xs text-base-content/50">ยังไม่บันทึก</div>
-              <div className="text-xl font-bold text-error">{totalStudents - withAdmissions}</div>
-            </div>
-          </div>
+        {/* สรุป + ตัวกรอง + ปุ่ม */}
+        <div className="card no-print anim-fade-up overflow-hidden bg-base-100">
+          {/* ตัวเลขสรุป */}
+          <dl className="grid grid-cols-2 divide-base-300 border-b border-base-300 sm:grid-cols-4 sm:divide-x">
+            {[
+              { label: 'นักเรียนทั้งหมด', value: totalStudents, cls: 'text-base-content' },
+              {
+                label: isFiltered ? 'บันทึกในช่วงนี้' : 'บันทึกมหาลัยแล้ว',
+                value: withAdmissions,
+                cls: 'text-primary',
+              },
+              { label: 'ยืนยันสิทธิ์แล้ว', value: confirmed, cls: 'text-success' },
+              { label: 'ยังไม่บันทึก', value: totalStudents - withAdmissions, cls: 'text-error' },
+            ].map((s) => (
+              <div key={s.label} className="px-4 py-3 text-center max-sm:border-b max-sm:border-base-300">
+                <dd className={`text-xl font-semibold tabular-nums ${s.cls}`}>{s.value}</dd>
+                <dt className="mt-0.5 text-xs text-base-content/55">{s.label}</dt>
+              </div>
+            ))}
+          </dl>
 
-          {/* Filter + Actions row */}
+          {/* ตัวกรอง + ปุ่มส่งออก */}
           <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-            {/* Date range filter */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-base-content/50 whitespace-nowrap">📅 ตั้งแต่</span>
+              <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-base-content/55">
+                <Icon name="calendar" size={14} />
+                ตั้งแต่
+              </span>
               <ThaiDatePicker value={dateFrom} onChange={setDateFrom} />
-              <span className="text-xs text-base-content/40">ถึง</span>
+              <span className="text-xs text-base-content/45">ถึง</span>
               <ThaiDatePicker value={dateTo} onChange={setDateTo} />
               {isFiltered && (
                 <button
-                  className="btn btn-ghost btn-xs"
+                  className="btn btn-ghost btn-xs gap-1"
                   onClick={() => { setDateFrom(''); setDateTo(''); }}
                 >
-                  ✕ ล้าง
+                  <Icon name="x" size={12} />
+                  ล้าง
                 </button>
               )}
             </div>
 
-            {/* Checkbox: รวมไม่มีข้อมูล */}
-            <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+            <label className="flex cursor-pointer items-center gap-2 whitespace-nowrap">
               <input
                 type="checkbox"
                 className="checkbox checkbox-sm checkbox-primary"
@@ -314,31 +351,30 @@ export default function AdmissionTableReportPage() {
               <span className="text-sm">รวมนักเรียนที่ไม่มีข้อมูล</span>
             </label>
 
-            {/* Divider */}
-            <div className="hidden sm:block w-px h-6 bg-base-300" />
-
-            {/* Action buttons */}
-            <div className="flex gap-2 flex-wrap">
+            <div className="ml-auto flex flex-wrap gap-2">
               <button
-                className="btn btn-success btn-sm gap-1"
+                className="btn btn-outline btn-sm gap-1.5"
                 onClick={exportExcel}
                 disabled={loading || students.length === 0}
               >
-                📊 Excel
+                <Icon name="sheet" size={15} />
+                Excel
               </button>
               <button
-                className="btn btn-primary btn-sm gap-1"
+                className="btn btn-outline btn-sm gap-1.5"
                 onClick={exportPdf}
                 disabled={loading || students.length === 0}
               >
-                🖨️ PDF
+                <Icon name="print" size={15} />
+                PDF
               </button>
               <button
-                className="btn btn-secondary btn-sm gap-1"
+                className="btn btn-primary btn-sm gap-1.5"
                 onClick={() => setShowChart(true)}
                 disabled={loading || allAdmissions.length === 0}
               >
-                🥧 กราฟ
+                <Icon name="chart" size={15} />
+                ดูกราฟ
               </button>
             </div>
           </div>
@@ -347,125 +383,101 @@ export default function AdmissionTableReportPage() {
         {/* Chart Modal */}
         {showChart && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a102a]/55 p-4 backdrop-blur-[2px]"
             onClick={() => setShowChart(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="กราฟวิเคราะห์ผลการสอบ"
           >
             <div
-              className="bg-base-100 rounded-2xl shadow-2xl w-full max-w-5xl mx-4 p-6 max-h-[90vh] overflow-y-auto"
+              className="anim-scale-in max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-base-300 bg-base-100 p-6 shadow-2xl"
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold">📊 กราฟวิเคราะห์ผลการสอบ ปีการศึกษา {yearName}</h2>
-                <button className="btn btn-ghost btn-sm btn-circle" onClick={() => setShowChart(false)}>✕</button>
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="gt-chip size-9">
+                    <Icon name="chart" size={18} />
+                  </span>
+                  <h2 className="text-base font-semibold sm:text-lg">
+                    กราฟวิเคราะห์ผลการสอบ ปีการศึกษา {yearName}
+                  </h2>
+                </div>
+                <button
+                  className="btn btn-ghost btn-sm px-2"
+                  onClick={() => setShowChart(false)}
+                  aria-label="ปิดกราฟ"
+                >
+                  <Icon name="x" size={18} />
+                </button>
               </div>
 
-              {/* Tab switcher */}
-              <div className="flex gap-2 mb-5">
+              {/* สลับชุดข้อมูล */}
+              <div className="mb-6 flex flex-wrap gap-2">
                 <button
-                  className={`btn btn-sm ${chartMode === 'all' ? 'btn-primary' : 'btn-outline btn-primary'}`}
+                  className={`btn btn-sm gap-1.5 ${chartMode === 'all' ? 'btn-primary' : 'btn-outline'}`}
                   onClick={() => setChartMode('all')}
+                  aria-pressed={chartMode === 'all'}
                 >
                   รวมทั้งหมดที่บันทึก
-                  <span className={`badge badge-sm ${chartMode === 'all' ? 'badge-primary-content bg-white/30 text-white' : 'badge-primary'}`}>
-                    {allAdmissions.length}
-                  </span>
+                  <span className="font-semibold tabular-nums">{allAdmissions.length}</span>
                 </button>
                 <button
-                  className={`btn btn-sm ${chartMode === 'confirmed' ? 'btn-success' : 'btn-outline btn-success'}`}
+                  className={`btn btn-sm gap-1.5 ${chartMode === 'confirmed' ? 'btn-primary' : 'btn-outline'}`}
                   onClick={() => setChartMode('confirmed')}
+                  aria-pressed={chartMode === 'confirmed'}
                 >
                   เฉพาะยืนยันสิทธิ์แล้ว
-                  <span className={`badge badge-sm ${chartMode === 'confirmed' ? 'bg-white/30 text-white' : 'badge-success'}`}>
-                    {confirmedAdmissions.length}
-                  </span>
+                  <span className="font-semibold tabular-nums">{confirmedAdmissions.length}</span>
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Pie 1: by University */}
-                <div className="flex flex-col gap-2">
-                  <h3 className="font-semibold text-center">มหาวิทยาลัยที่สอบติด</h3>
-                  {activeData.uni.length === 0 ? (
-                    <p className="text-center text-base-content/40 py-10">ไม่มีข้อมูล</p>
-                  ) : (
-                    <>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                          <Pie
-                            data={activeData.uni}
-                            cx="50%" cy="50%"
-                            outerRadius={110}
-                            dataKey="value"
-                            label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
-                            labelLine={false}
-                          >
-                            {activeData.uni.map((_, i) => (
-                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(v, n) => [`${v} รายการ (${((v/activeTotal)*100).toFixed(1)}%)`, n]} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="flex flex-col gap-1 mt-2">
-                        {activeData.uni.map((d, i) => (
-                          <div key={i} className="flex items-center gap-2 text-xs">
-                            <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                            <span className="flex-1 truncate">{d.name}</span>
-                            <span className="font-semibold">{d.value} รายการ</span>
-                            <span className="text-base-content/50">({((d.value/activeTotal)*100).toFixed(1)}%)</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Pie 2: by Faculty */}
-                <div className="flex flex-col gap-2">
-                  <h3 className="font-semibold text-center">คณะที่สอบติด</h3>
-                  {activeData.fac.length === 0 ? (
-                    <p className="text-center text-base-content/40 py-10">ไม่มีข้อมูล</p>
-                  ) : (
-                    <>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart>
-                          <Pie
-                            data={activeData.fac}
-                            cx="50%" cy="50%"
-                            outerRadius={110}
-                            dataKey="value"
-                            label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
-                            labelLine={false}
-                          >
-                            {activeData.fac.map((_, i) => (
-                              <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(v, n) => [`${v} รายการ (${((v/activeTotal)*100).toFixed(1)}%)`, n]} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                      <div className="flex flex-col gap-1 mt-2">
-                        {activeData.fac.map((d, i) => (
-                          <div key={i} className="flex items-center gap-2 text-xs">
-                            <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                            <span className="flex-1 truncate">{d.name}</span>
-                            <span className="font-semibold">{d.value} รายการ</span>
-                            <span className="text-base-content/50">({((d.value/activeTotal)*100).toFixed(1)}%)</span>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
+              <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+                {[
+                  { key: 'uni', title: 'มหาวิทยาลัยที่สอบติด', data: activeData.uni },
+                  { key: 'fac', title: 'คณะที่สอบติด', data: activeData.fac },
+                ].map(({ key, title, data }) => (
+                  <section key={key} className="flex flex-col gap-2">
+                    <h3 className="text-center text-sm font-semibold">{title}</h3>
+                    {data.length === 0 ? (
+                      <p className="py-10 text-center text-sm text-base-content/45">ไม่มีข้อมูล</p>
+                    ) : (
+                      <>
+                        <ResponsiveContainer width="100%" height={300}>
+                          <PieChart>
+                            <Pie
+                              data={data}
+                              cx="50%" cy="50%"
+                              outerRadius={110}
+                              dataKey="value"
+                              label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                              labelLine={false}
+                            >
+                              {data.map((_, i) => (
+                                <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v, n) => [
+                                `${v} รายการ (${((v / activeTotal) * 100).toFixed(1)}%)`,
+                                n,
+                              ]}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <ChartLegend data={data} total={activeTotal} colors={PIE_COLORS} />
+                      </>
+                    )}
+                  </section>
+                ))}
               </div>
 
-              {/* Pie 3: by Program/สาขา — full width */}
-              <div className="flex flex-col gap-2 mt-8 border-t border-base-300 pt-6">
-                <h3 className="font-semibold text-center">สาขา/กลุ่มวิชาที่สอบติด</h3>
+              {/* สาขา — เต็มความกว้าง */}
+              <section className="mt-8 flex flex-col gap-2 border-t border-base-300 pt-6">
+                <h3 className="text-center text-sm font-semibold">สาขา/กลุ่มวิชาที่สอบติด</h3>
                 {activeData.prog.length === 0 ? (
-                  <p className="text-center text-base-content/40 py-10">ไม่มีข้อมูล</p>
+                  <p className="py-10 text-center text-sm text-base-content/45">ไม่มีข้อมูล</p>
                 ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                  <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
                     <ResponsiveContainer width="100%" height={350}>
                       <PieChart>
                         <Pie
@@ -480,29 +492,29 @@ export default function AdmissionTableReportPage() {
                             <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(v, n) => [`${v} รายการ (${((v/activeTotal)*100).toFixed(1)}%)`, n]} />
+                        <Tooltip
+                          formatter={(v, n) => [
+                            `${v} รายการ (${((v / activeTotal) * 100).toFixed(1)}%)`,
+                            n,
+                          ]}
+                        />
                       </PieChart>
                     </ResponsiveContainer>
-                    <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
-                      {activeData.prog.map((d, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs">
-                          <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
-                          <span className="flex-1">{d.name}</span>
-                          <span className="font-semibold whitespace-nowrap">{d.value} รายการ</span>
-                          <span className="text-base-content/50 whitespace-nowrap">({((d.value/activeTotal)*100).toFixed(1)}%)</span>
-                        </div>
-                      ))}
-                    </div>
+                    <ChartLegend data={activeData.prog} total={activeTotal} colors={PIE_COLORS} scroll />
                   </div>
                 )}
-              </div>
+              </section>
             </div>
           </div>
         )}
 
         {loading && (
-          <div className="flex justify-center py-10">
-            <span className="loading loading-spinner loading-lg" />
+          <div className="card mt-4 bg-base-100 p-5">
+            <div className="flex flex-col gap-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <span key={i} className="gt-skeleton h-4" style={{ width: `${92 - i * 7}%` }} />
+              ))}
+            </div>
           </div>
         )}
       </div>

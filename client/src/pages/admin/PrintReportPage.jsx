@@ -150,28 +150,32 @@ export default function PrintReportPage() {
 
         .print-notice button {
           margin-top: 10px;
-          padding: 8px 20px;
+          padding: 9px 22px;
           font-size: 14px;
+          font-weight: 500;
           font-family: 'Prompt', sans-serif;
           border: none;
-          border-radius: 8px;
-          background: #7c3aed;
+          border-radius: 10px;
+          background: #5b2d8e;
           color: white;
           cursor: pointer;
+          transition: background-color 0.18s ease;
         }
+        .print-notice button:hover { background: #4a2474; }
+        .print-notice button:focus-visible { outline: 2px solid #5b2d8e; outline-offset: 2px; }
         .print-notice button:disabled { opacity: 0.5; cursor: default; }
 
         .print-progress-bar {
           width: 320px;
           height: 8px;
           border-radius: 999px;
-          background: #e5e7eb;
+          background: #e6e0f0;
           margin: 12px auto 0;
           overflow: hidden;
         }
         .print-progress-bar > div {
           height: 100%;
-          background: #7c3aed;
+          background: #5b2d8e;
           transition: width 0.2s ease;
         }
 
@@ -212,10 +216,10 @@ export default function PrintReportPage() {
         }
       `}</style>
 
-      <div className="print-notice">
+      <div className="print-notice" role="status" aria-live="polite">
         {phase === 'loading' ? (
           <>
-            <p>⏳ กำลังเตรียมรูปภาพ... {pct}% ({progress.done}/{progress.total})</p>
+            <p>กำลังเตรียมรูปภาพ... {pct}% ({progress.done}/{progress.total})</p>
             <p style={{ fontSize: 13, marginTop: 4 }}>
               รอจนโหลดรูปครบก่อน แล้วกล่อง print จะเปิดให้อัตโนมัติ เพื่อให้ PDF ตรงกับตัวอย่าง
             </p>
@@ -223,11 +227,11 @@ export default function PrintReportPage() {
           </>
         ) : (
           <>
-            <p>📄 หน้านี้พร้อม print เป็น PDF แล้ว ({students.length} คน)</p>
+            <p>หน้านี้พร้อม print เป็น PDF แล้ว ({students.length} คน)</p>
             <p style={{ fontSize: 13, marginTop: 4 }}>
-              ตั้ง Destination เป็น "Save as PDF" | ปิด margin และเลือก "No headers and footers"
+              ตั้ง Destination เป็น "Save as PDF" · ปิด margin และเลือก "No headers and footers"
             </p>
-            <button onClick={() => window.print()}>🖨️ เปิดกล่อง Print / Save PDF</button>
+            <button onClick={() => window.print()}>เปิดกล่อง Print / Save PDF</button>
           </>
         )}
       </div>

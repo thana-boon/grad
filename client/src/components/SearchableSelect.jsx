@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import Icon from './ui/Icon';
 
 // Dropdown ที่พิมพ์ค้นหา (filter) ได้ — ไม่พึ่ง library ภายนอก
 // options: [{ value, label }]
@@ -66,40 +67,57 @@ export default function SearchableSelect({
     <div ref={rootRef} className={`relative ${className}`} style={{ colorScheme: 'light' }}>
       <button
         type="button"
-        className="select select-bordered select-xs w-full flex items-center justify-between gap-2 text-left"
+        className="input input-xs flex w-full items-center justify-between gap-2 text-left"
         onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        <span className="truncate" style={{ color: '#000' }}>
-          {selected ? selected.label : <span className="opacity-50">{placeholder}</span>}
+        <span className={`truncate ${selected ? '' : 'text-base-content/45'}`}>
+          {selected ? selected.label : placeholder}
         </span>
+        <Icon
+          name="chevronDown"
+          size={13}
+          className={`text-base-content/45 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full bg-base-100 border border-base-300 rounded-box shadow-lg">
-          <div className="p-1.5">
+        <div className="anim-scale-in absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-base-300 bg-base-100 shadow-lg">
+          <div className="relative p-1.5">
+            <Icon
+              name="search"
+              size={13}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base-content/40"
+            />
             <input
               autoFocus
               type="text"
-              className="input input-bordered input-xs w-full"
-              placeholder="🔍 พิมพ์เพื่อค้นหา..."
+              className="input input-xs w-full pl-7"
+              placeholder="พิมพ์เพื่อค้นหา..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
             />
           </div>
-          <ul ref={listRef} className="menu menu-xs p-1 pt-0 max-h-60 overflow-y-auto flex-nowrap">
+          <ul ref={listRef} className="max-h-60 overflow-y-auto p-1 pt-0" role="listbox">
             {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-xs text-base-content/40">ไม่พบรายการ</li>
+              <li className="px-2.5 py-2 text-xs text-base-content/45">ไม่พบรายการ</li>
             ) : (
               filtered.map((opt, i) => (
                 <li key={opt.value}>
                   <button
                     type="button"
-                    className={`text-xs ${opt.value === value ? 'active' : ''} ${i === highlight ? 'bg-base-200' : ''}`}
+                    role="option"
+                    aria-selected={opt.value === value}
+                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                      i === highlight ? 'bg-secondary' : ''
+                    } ${opt.value === value ? 'font-medium text-primary' : ''}`}
                     onMouseEnter={() => setHighlight(i)}
                     onClick={() => pick(opt)}
                   >
-                    {opt.label}
+                    <span className="truncate">{opt.label}</span>
+                    {opt.value === value && <Icon name="check" size={13} strokeWidth={2.2} />}
                   </button>
                 </li>
               ))

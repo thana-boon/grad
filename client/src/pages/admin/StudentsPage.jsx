@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import api from '../../utils/api';
+import Icon from '../../components/ui/Icon';
+import { PageHeader, TableWrap, TableSkeleton, EmptyState, Tag } from '../../components/ui';
 
 export default function StudentsPage() {
   const [years, setYears] = useState([]);
@@ -85,136 +87,165 @@ export default function StudentsPage() {
 
   return (
     <div className="relative">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
-        <div>
-          <h2 className="text-lg font-semibold">🎓 รายชื่อนักเรียน ม.6</h2>
-          <p className="text-xs text-base-content/50">
-            ดึงข้อมูลจาก Student API · เฉพาะชั้น ม.6 · เลขประชาชนคลิกดูรายคน
-          </p>
-        </div>
-
-        {/* Year selector */}
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-base-content/60 whitespace-nowrap">📅 ปีการศึกษา</label>
-          <select
-            className="select select-bordered select-sm"
-            value={selectedYearId ?? ''}
-            onChange={(e) => setSelectedYearId(Number(e.target.value))}
-            disabled={initializing}
-          >
-            {!selectedYearId && <option value="">-- เลือกปี --</option>}
-            {years.map((y) => (
-              <option key={y.id} value={y.id}>
-                {y.title || y.year_be}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Active year info */}
-      {selectedYear && (
-        <div className="flex items-center gap-2 mb-4">
-          <span className="badge badge-primary badge-sm">
-            {selectedYear.title || selectedYear.year_be}
-          </span>
-          {!loading && (
-            <span className="text-xs text-base-content/50">
-              พบ {students.length} คน (กรองแสดง {filtered.length} คน)
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <input
-          type="text"
-          placeholder="🔍 ค้นหา รหัส, ชื่อ, ห้อง..."
-          className="input input-bordered input-sm w-full max-w-xs"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <PageHeader
+        icon="graduation"
+        title="รายชื่อนักเรียน ม.6"
+        subtitle="ดึงข้อมูลจาก SchoolOS · เฉพาะชั้น ม.6 · เลขประชาชนกดดูรายคน"
+      >
+        <label htmlFor="year-select" className="whitespace-nowrap text-xs text-base-content/55">
+          ปีการศึกษา
+        </label>
         <select
-          className="select select-bordered select-sm"
+          id="year-select"
+          className="select select-sm"
+          value={selectedYearId ?? ''}
+          onChange={(e) => setSelectedYearId(Number(e.target.value))}
+          disabled={initializing}
+        >
+          {!selectedYearId && <option value="">-- เลือกปี --</option>}
+          {years.map((y) => (
+            <option key={y.id} value={y.id}>
+              {y.title || y.year_be}
+            </option>
+          ))}
+        </select>
+      </PageHeader>
+
+      {/* ตัวกรอง */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative w-full max-w-xs">
+          <Icon
+            name="search"
+            size={15}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base-content/40"
+          />
+          <input
+            type="text"
+            placeholder="ค้นหา รหัส, ชื่อ, ห้อง..."
+            className="input input-sm w-full pl-9"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="ค้นหานักเรียน"
+          />
+        </div>
+        <select
+          className="select select-sm"
           value={filterRoom}
           onChange={(e) => setFilterRoom(e.target.value)}
+          aria-label="กรองตามห้อง"
         >
-          <option value="">🏫 ทุกห้อง</option>
+          <option value="">ทุกห้อง</option>
           {rooms.map((r) => (
             <option key={r} value={r}>ห้อง {r}</option>
           ))}
         </select>
         {(search || filterRoom) && (
           <button
-            className="btn btn-ghost btn-sm text-base-content/50"
+            className="btn btn-ghost btn-sm gap-1"
             onClick={() => { setSearch(''); setFilterRoom(''); }}
           >
-            ✕ ล้าง
+            <Icon name="x" size={14} />
+            ล้างตัวกรอง
           </button>
+        )}
+
+        {selectedYear && !loading && (
+          <span className="ml-auto text-xs text-base-content/55">
+            <span className="font-medium tabular-nums text-base-content">{filtered.length}</span>
+            {filtered.length !== students.length && (
+              <> จาก <span className="tabular-nums">{students.length}</span></>
+            )}{' '}
+            คน
+          </span>
         )}
       </div>
 
-      {/* Table */}
-      <div className="card bg-base-100 shadow-sm overflow-x-auto">
-        <table className="table table-zebra table-sm">
+      {/* ตาราง */}
+      <TableWrap sticky className="anim-fade-up">
+        <table className="table table-sm">
           <thead>
-            <tr className="text-xs text-base-content/60 uppercase tracking-wide">
-              <th>#</th>
-              <th>🪪 รหัสนักเรียน</th>
-              <th>📝 ชื่อ</th>
+            <tr>
+              <th className="w-10">#</th>
+              <th>รหัสนักเรียน</th>
+              <th>ชื่อ</th>
               <th>นามสกุล</th>
-              <th>🏷️ ชั้น</th>
-              <th>🏫 ห้อง</th>
-              <th>เลขที่</th>
+              <th>ชั้น</th>
+              <th>ห้อง</th>
+              <th className="text-center">เลขที่</th>
               <th>เลขประชาชน</th>
             </tr>
           </thead>
           <tbody>
             {initializing || loading ? (
-              <tr>
-                  <td className="text-center py-12 text-base-content/40" colSpan={8}>
-                  <span className="loading loading-spinner loading-sm mr-2" />
-                  กำลังโหลด...
-                </td>
-              </tr>
+              <TableSkeleton rows={8} cols={8} />
             ) : !selectedYearId ? (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-base-content/30">
-                  กรุณาเลือกปีการศึกษา
+                <td colSpan={8} className="p-0">
+                  <EmptyState
+                    icon="calendar"
+                    title="เลือกปีการศึกษาก่อน"
+                    hint="เลือกปีการศึกษาที่มุมขวาบน เพื่อดูรายชื่อนักเรียนชั้น ม.6"
+                  />
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-base-content/30">
-                  {students.length === 0 ? 'ไม่พบนักเรียน ม.6 ในปีการศึกษานี้' : 'ไม่พบข้อมูลที่ค้นหา'}
+                <td colSpan={8} className="p-0">
+                  <EmptyState
+                    icon={students.length === 0 ? 'graduation' : 'search'}
+                    title={
+                      students.length === 0
+                        ? 'ไม่พบนักเรียน ม.6 ในปีการศึกษานี้'
+                        : 'ไม่พบข้อมูลที่ค้นหา'
+                    }
+                    hint={
+                      students.length === 0
+                        ? 'ลองเปลี่ยนปีการศึกษา หรือตรวจสอบข้อมูลชั้นเรียนใน SchoolOS'
+                        : 'ลองเปลี่ยนคำค้นหา หรือกด ล้างตัวกรอง เพื่อดูทั้งหมด'
+                    }
+                    action={
+                      (search || filterRoom) && (
+                        <button
+                          className="btn btn-outline btn-sm gap-1"
+                          onClick={() => { setSearch(''); setFilterRoom(''); }}
+                        >
+                          <Icon name="x" size={14} />
+                          ล้างตัวกรอง
+                        </button>
+                      )
+                    }
+                  />
                 </td>
               </tr>
             ) : (
               filtered.map((s, i) => (
                 <tr key={`${s.student_code}-${i}`}>
-                  <td className="text-base-content/40 text-xs">{i + 1}</td>
-                  <td className="font-mono text-xs">{s.student_code}</td>
+                  <td className="text-xs tabular-nums text-base-content/40">{i + 1}</td>
+                  <td className="font-mono text-xs tabular-nums">{s.student_code}</td>
                   <td>{s.title_prefix}{s.first_name}</td>
                   <td>{s.last_name}</td>
                   <td>
-                    <span className="badge badge-outline badge-sm">{s.class_level}</span>
+                    <Tag tone="muted">{s.class_level}</Tag>
                   </td>
-                  <td>{s.class_room}</td>
-                  <td className="text-center">{s.number_in_room}</td>
-                  <td className="font-mono text-xs tracking-widest">
+                  <td className="tabular-nums">{s.class_room}</td>
+                  <td className="text-center tabular-nums">{s.number_in_room}</td>
+                  <td className="font-mono text-xs tabular-nums tracking-wider">
                     {citizenIds[s.student_code] !== undefined ? (
-                      citizenIds[s.student_code] || <span className="text-base-content/30">—</span>
+                      citizenIds[s.student_code] || (
+                        <span className="text-base-content/30">—</span>
+                      )
                     ) : (
                       <button
-                        className="btn btn-ghost btn-xs font-normal"
+                        className="btn btn-ghost btn-xs gap-1 font-normal"
                         onClick={() => revealCitizenId(s.student_code)}
                         disabled={loadingCode === s.student_code}
                       >
-                        {loadingCode === s.student_code
-                          ? <span className="loading loading-spinner loading-xs" />
-                          : '👁 ดู'}
+                        {loadingCode === s.student_code ? (
+                          <span className="loading loading-spinner loading-xs" />
+                        ) : (
+                          <Icon name="eye" size={13} />
+                        )}
+                        ดู
                       </button>
                     )}
                   </td>
@@ -223,7 +254,7 @@ export default function StudentsPage() {
             )}
           </tbody>
         </table>
-      </div>
+      </TableWrap>
     </div>
   );
 }

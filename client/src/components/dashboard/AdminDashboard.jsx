@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
+import Icon from '../ui/Icon';
+import { SectionTitle, EmptyState, CardSkeleton } from '../ui';
+
+const SHORTCUTS = [
+  { label: 'รายชื่อนักเรียน', desc: 'ข้อมูล ม.6 ทั้งหมดจาก Student API', icon: 'graduation', path: '/admin/students' },
+  { label: 'สถานะผลสอบ', desc: 'บันทึก/ยืนยันสิทธิ์รายคน', icon: 'clipboard', path: '/admin/admission-status' },
+  { label: 'รายงาน/Export', desc: 'ออกภาพรายงานและไฟล์ Excel', icon: 'chart', path: '/admin/report' },
+  { label: 'รายงานตาราง', desc: 'ตารางสรุปสำหรับพิมพ์', icon: 'table', path: '/admin/report-table' },
+  { label: 'มหาวิทยาลัย', desc: 'จัดการรายชื่อและโลโก้', icon: 'university', path: '/admin/universities' },
+  { label: 'จัดการ Account', desc: 'บัญชีผู้ใช้และสิทธิ์', icon: 'users', path: '/admin/accounts' },
+];
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -9,7 +20,7 @@ export default function AdminDashboard() {
   const [yearId, setYearId] = useState('');
   const [yearName, setYearName] = useState('');
   const [students, setStudents] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
@@ -26,8 +37,10 @@ export default function AdminDashboard() {
       if (pick) {
         setYearId(String(pick.id));
         setYearName(String(pick.year_be || pick.title || pick.name || ''));
+      } else {
+        setLoading(false);
       }
-    });
+    }).catch(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -42,17 +55,10 @@ export default function AdminDashboard() {
   const withAdmission = students.filter(s => s.admissions?.length > 0).length;
   const confirmed = students.filter(s => s.admissions?.some(a => a.confirmed)).length;
   const notRecorded = total - withAdmission;
+  const pct = (n) => (total > 0 ? Math.round((n / total) * 100) : 0);
 
-  // Top universities (all admissions)
+  // มหาวิทยาลัยยอดนิยมจากทุกใบสมัครที่บันทึกไว้
   const allAdmissions = students.flatMap(s => s.admissions || []);
-  const uniCount = Object.values(
-    allAdmissions.reduce((acc, a) => {
-      const key = a.university_name || 'ไม่ระบุ';
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {})
-  ).map((v, i, arr) => v); // placeholder, rebuild below
-
   const uniMap = allAdmissions.reduce((acc, a) => {
     const key = a.university_name || 'ไม่ระบุ';
     if (!acc[key]) acc[key] = { name: key, logo_url: a.logo_url || null, count: 0 };
@@ -62,133 +68,237 @@ export default function AdminDashboard() {
   const topUnis = Object.values(uniMap).sort((a, b) => b.count - a.count).slice(0, 6);
   const maxCount = topUnis[0]?.count || 1;
 
-  const SHORTCUTS = [
-    { label: 'จัดการ Account', icon: '👥', path: '/admin/accounts' },
-    { label: 'รายชื่อนักเรียน', icon: '🎓', path: '/admin/students' },
-    { label: 'สถานะผลสอบ', icon: '📋', path: '/admin/admission-status' },
-    { label: 'รายงาน/Export', icon: '📊', path: '/admin/report' },
-    { label: 'รายงานตาราง', icon: '🗂️', path: '/admin/report-table' },
-    { label: 'มหาวิทยาลัย', icon: '🏛️', path: '/admin/universities' },
+  const METRICS = [
+    { icon: 'graduation', label: 'นักเรียนทั้งหมด', value: total, helper: `ปีการศึกษา ${yearName || '—'}` },
+    { icon: 'clipboard', label: 'บันทึกผลแล้ว', value: withAdmission, helper: `${pct(withAdmission)}% ของทั้งหมด` },
+    { icon: 'checkCircle', label: 'ยืนยันสิทธิ์แล้ว', value: confirmed, helper: `${pct(confirmed)}% ของทั้งหมด` },
   ];
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold">📊 ภาพรวม</h2>
-          <p className="text-sm text-base-content/50 mt-0.5">GradTrack — ระบบติดตามผลการสอบ</p>
-        </div>
-        <select
-          className="select select-bordered select-sm"
-          value={yearId}
-          onChange={e => {
-            const y = years.find(y => String(y.id) === e.target.value);
-            setYearId(e.target.value);
-            setYearName(y ? String(y.year_be || y.title || y.name || '') : '');
-          }}
-        >
-          {years.map(y => (
-            <option key={y.id} value={y.id}>ปีการศึกษา {y.year_be || y.title || y.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: 'นักเรียนทั้งหมด', value: loading ? '…' : total, color: 'primary', icon: '🎓' },
-          { label: 'บันทึกมหาลัยแล้ว', value: loading ? '…' : withAdmission, color: 'info', icon: '📝' },
-          { label: 'ยืนยันสิทธิ์แล้ว', value: loading ? '…' : confirmed, color: 'success', icon: '✅' },
-          { label: 'ยังไม่บันทึก', value: loading ? '…' : notRecorded, color: 'error', icon: '⏳' },
-        ].map(s => (
-          <div key={s.label} className="card bg-base-100 shadow border border-base-200">
-            <div className="card-body p-4">
-              <div className="text-2xl mb-1">{s.icon}</div>
-              <div className={`text-3xl font-bold text-${s.color}`}>{s.value}</div>
-              <div className="text-xs text-base-content/50 mt-1">{s.label}</div>
-            </div>
+      {/* ── แถบสถานะหัวหน้า ────────────────────────────────── */}
+      <section className="gt-band anim-fade-up p-6 lg:p-7">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-white/60">ภาพรวมระบบ</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">
+              การศึกษาต่อ ปีการศึกษา {yearName || '—'}
+            </h2>
+            <p className="mt-1.5 text-sm text-white/70">
+              {loading
+                ? 'กำลังรวบรวมข้อมูล...'
+                : total === 0
+                  ? 'ยังไม่มีข้อมูลนักเรียนในปีการศึกษานี้'
+                  : `บันทึกผลแล้ว ${withAdmission} จาก ${total} คน · ยืนยันสิทธิ์ ${confirmed} คน`}
+            </p>
+            <span className="gt-band-rule mt-4 block" />
           </div>
-        ))}
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Top Universities */}
-        <div className="card bg-base-100 shadow border border-base-200">
-          <div className="card-body p-4">
-            <h3 className="font-bold text-base mb-3">🏛️ มหาวิทยาลัยยอดนิยม ปี {yearName}</h3>
-            {loading ? (
-              <div className="flex justify-center py-8"><span className="loading loading-spinner" /></div>
-            ) : topUnis.length === 0 ? (
-              <p className="text-center text-base-content/40 py-8 text-sm">ยังไม่มีข้อมูล</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {topUnis.map((u, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <span className="text-xs text-base-content/40 w-4 text-right flex-shrink-0">{i + 1}</span>
-                    {u.logo_url
-                      ? <img src={resolveMediaUrl(u.logo_url)} alt="" className="w-7 h-7 object-contain flex-shrink-0" />
-                      : <span className="w-7 h-7 flex items-center justify-center text-lg flex-shrink-0">🏛️</span>
-                    }
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium truncate">{u.name}</div>
-                      <div className="w-full bg-base-200 rounded-full h-1.5 mt-1">
-                        <div
-                          className="bg-primary h-1.5 rounded-full transition-all"
-                          style={{ width: `${(u.count / maxCount) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                    <span className="text-sm font-bold text-primary flex-shrink-0">{u.count}</span>
-                  </div>
-                ))}
+          {/* ตัวเลขสำคัญ 3 ตัว */}
+          <div className="grid shrink-0 grid-cols-3 divide-x divide-white/15">
+            {METRICS.map((m, i) => (
+              <div key={m.label} className={`px-4 ${i === 0 ? 'pl-0' : ''} lg:px-6`}>
+                <Icon name={m.icon} size={16} className="text-white/50" />
+                <p className="mt-1.5 text-[11px] text-white/60">{m.label}</p>
+                <p className="text-xl font-semibold tabular-nums text-white">
+                  {loading ? '—' : m.value}
+                </p>
+                <p className="text-[11px] text-white/45">{loading ? '' : m.helper}</p>
               </div>
-            )}
+            ))}
           </div>
         </div>
 
-        {/* Shortcuts */}
-        <div className="card bg-base-100 shadow border border-base-200">
-          <div className="card-body p-4">
-            <h3 className="font-bold text-base mb-3">⚡ ไปยังหน้าต่างๆ</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {SHORTCUTS.map(s => (
-                <button
-                  key={s.path}
-                  className="btn btn-outline btn-sm justify-start gap-2 font-normal"
-                  onClick={() => navigate(s.path)}
-                >
-                  <span>{s.icon}</span>
-                  <span className="truncate">{s.label}</span>
-                </button>
+        {/* เลือกปีการศึกษา */}
+        {years.length > 0 && (
+          <div className="mt-6 flex items-center gap-2 border-t border-white/10 pt-4">
+            <Icon name="calendar" size={15} className="text-white/50" />
+            <label htmlFor="year" className="text-xs text-white/60">
+              ปีการศึกษา
+            </label>
+            <select
+              id="year"
+              className="rounded-lg border border-white/15 bg-white/10 px-2.5 py-1 text-sm text-white outline-none transition-colors hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F5C518]"
+              value={yearId}
+              onChange={e => {
+                const y = years.find(y => String(y.id) === e.target.value);
+                setYearId(e.target.value);
+                setYearName(y ? String(y.year_be || y.title || y.name || '') : '');
+              }}
+            >
+              {years.map(y => (
+                <option key={y.id} value={y.id} className="text-base-content">
+                  {y.year_be || y.title || y.name}
+                </option>
               ))}
-            </div>
+            </select>
           </div>
-        </div>
-      </div>
+        )}
+      </section>
 
-      {/* Progress bar summary */}
-      {!loading && total > 0 && (
-        <div className="card bg-base-100 shadow border border-base-200">
-          <div className="card-body p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-bold text-sm">ความคืบหน้าการบันทึกผล ปี {yearName}</h3>
-              <span className="text-xs text-base-content/50">{withAdmission}/{total} คน ({Math.round((withAdmission/total)*100)}%)</span>
+      {/* ── ความคืบหน้า ────────────────────────────────────── */}
+      <section className="card anim-fade-up bg-base-100 p-5" style={{ '--anim-delay': '0.06s' }}>
+        <SectionTitle icon="chart">ความคืบหน้าการบันทึกผล</SectionTitle>
+
+        {loading ? (
+          <CardSkeleton className="h-2.5 w-full rounded-full" />
+        ) : total === 0 ? (
+          <p className="text-sm text-base-content/50">
+            เลือกปีการศึกษาที่มีข้อมูลนักเรียน เพื่อดูความคืบหน้า
+          </p>
+        ) : (
+          <>
+            <div className="mb-2 flex items-baseline justify-between">
+              <span className="text-sm text-base-content/60">
+                บันทึกแล้ว{' '}
+                <span className="font-semibold tabular-nums text-base-content">{withAdmission}</span>
+                {' / '}
+                <span className="tabular-nums">{total}</span> คน
+              </span>
+              <span className="text-lg font-semibold tabular-nums text-primary">
+                {pct(withAdmission)}%
+              </span>
             </div>
-            <div className="w-full bg-base-200 rounded-full h-3">
+
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary">
               <div
-                className="bg-primary h-3 rounded-full transition-all"
-                style={{ width: `${(withAdmission / total) * 100}%` }}
+                className="anim-bar-grow h-full rounded-full bg-primary"
+                style={{ width: `${pct(withAdmission)}%` }}
+                role="progressbar"
+                aria-valuenow={pct(withAdmission)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="ความคืบหน้าการบันทึกผล"
               />
             </div>
-            <div className="flex justify-between text-xs text-base-content/40 mt-1">
-              <span>บันทึกแล้ว {withAdmission} คน</span>
-              <span>ยืนยันแล้ว {confirmed} คน ({Math.round((confirmed/total)*100)}%)</span>
+
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+              <span className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-success" />
+                <span className="text-base-content/60">ยืนยันสิทธิ์</span>
+                <span className="font-semibold tabular-nums">{confirmed} คน</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-primary" />
+                <span className="text-base-content/60">บันทึกแล้ว</span>
+                <span className="font-semibold tabular-nums">{withAdmission} คน</span>
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-base-300" />
+                <span className="text-base-content/60">ยังไม่บันทึก</span>
+                <span className="font-semibold tabular-nums">{notRecorded} คน</span>
+              </span>
             </div>
+          </>
+        )}
+      </section>
+
+      {/* ── มหาวิทยาลัยยอดนิยม ─────────────────────────────── */}
+      <section className="card anim-fade-up bg-base-100 p-5" style={{ '--anim-delay': '0.1s' }}>
+        <SectionTitle
+          icon="university"
+          action={
+            topUnis.length > 0 && (
+              <button
+                onClick={() => navigate('/admin/university-students')}
+                className="btn btn-ghost btn-xs gap-1 text-primary"
+              >
+                ดูรายชื่อ
+                <Icon name="arrowUpRight" size={13} />
+              </button>
+            )
+          }
+        >
+          มหาวิทยาลัยยอดนิยม
+        </SectionTitle>
+
+        {loading ? (
+          <div className="flex flex-col gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <CardSkeleton className="size-8 rounded-lg" />
+                <CardSkeleton className="h-3 flex-1" />
+              </div>
+            ))}
           </div>
+        ) : topUnis.length === 0 ? (
+          <EmptyState
+            icon="university"
+            title="ยังไม่มีการบันทึกมหาวิทยาลัย"
+            hint="เมื่อบันทึกผลสอบของนักเรียนแล้ว อันดับมหาวิทยาลัยจะขึ้นที่นี่"
+            action={
+              <button onClick={() => navigate('/admin/admission-status')} className="btn btn-primary btn-sm">
+                <Icon name="plus" size={15} />
+                เริ่มบันทึกผลสอบ
+              </button>
+            }
+          />
+        ) : (
+          <ul className="stagger-children flex flex-col gap-3.5">
+            {topUnis.map((u, i) => (
+              <li key={u.name} className="flex items-center gap-3" style={{ '--i': i }}>
+                <span className="w-4 shrink-0 text-right text-xs tabular-nums text-base-content/35">
+                  {i + 1}
+                </span>
+                {u.logo_url ? (
+                  <img
+                    src={resolveMediaUrl(u.logo_url)}
+                    alt=""
+                    width="32"
+                    height="32"
+                    loading="lazy"
+                    className="size-8 shrink-0 rounded-lg bg-base-200 object-contain p-0.5"
+                  />
+                ) : (
+                  <span className="gt-chip size-8">
+                    <Icon name="university" size={16} />
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{u.name}</p>
+                  <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="anim-bar-grow h-full rounded-full bg-primary"
+                      style={{ width: `${(u.count / maxCount) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-primary">
+                  {u.count}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ── ทางลัดไปหน้าอื่น ───────────────────────────────── */}
+      <section className="anim-fade-up" style={{ '--anim-delay': '0.14s' }}>
+        <h2 className="mb-3 text-sm font-semibold text-base-content/70">ไปยังหน้าที่ใช้บ่อย</h2>
+        <div className="stagger-children grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {SHORTCUTS.map((s, i) => (
+            <button
+              key={s.path}
+              onClick={() => navigate(s.path)}
+              style={{ '--i': i }}
+              className="card card-interactive group flex flex-row items-center gap-4 bg-base-100 p-4 text-left active:scale-[0.985]"
+            >
+              <span className="gt-chip size-12 transition-colors group-hover:bg-primary group-hover:text-primary-content">
+                <Icon name={s.icon} size={22} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold tracking-tight">{s.label}</span>
+                <span className="mt-0.5 block truncate text-xs text-base-content/50">{s.desc}</span>
+              </span>
+              <Icon
+                name="arrowUpRight"
+                size={16}
+                className="text-base-content/25 transition-colors group-hover:text-primary"
+              />
+            </button>
+          ))}
         </div>
-      )}
+      </section>
     </div>
   );
 }
-

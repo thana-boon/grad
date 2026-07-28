@@ -34,13 +34,13 @@ export default function PrintAdmissionTablePage() {
         @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700&display=swap');
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Prompt', 'Noto Sans Thai', sans-serif; font-size: 10px; background: white; color: #111; }
-        .print-notice { text-align: center; padding: 16px; background: #f5f5f5; }
+        .print-notice { text-align: center; padding: 16px; background: #faf9fc; color: #4a4358; border-bottom: 1px solid #e6e0f0; }
         h2 { font-size: 14px; font-weight: 700; text-align: center; margin-bottom: 12px; padding-top: 12px; }
         table { width: 100%; border-collapse: collapse; font-size: 10px; }
-        th { background: #e5e7eb; font-weight: 600; padding: 5px 6px; border: 1px solid #ccc; text-align: left; }
-        td { padding: 4px 6px; border: 1px solid #ddd; vertical-align: top; }
-        tr:nth-child(even) td { background: #fafafa; }
-        .border-top td { border-top: 2px solid #aaa; }
+        th { background: #f1edf7; color: #3d2a55; font-weight: 600; padding: 5px 6px; border: 1px solid #cdc2de; text-align: left; }
+        td { padding: 4px 6px; border: 1px solid #e6e0f0; vertical-align: top; }
+        tr:nth-child(even) td { background: #faf9fc; }
+        .border-top td { border-top: 2px solid #b7a8cd; }
         .confirmed { color: #16a34a; font-weight: 600; }
         .dim { color: #aaa; }
         @media print {
@@ -51,7 +51,7 @@ export default function PrintAdmissionTablePage() {
       `}</style>
 
       <div className="print-notice">
-        <p>📄 กด <strong>Ctrl+P</strong> เพื่อพิมพ์ | เลือก "Save as PDF" | ปิด "Headers and footers" ใน More settings</p>
+        <p>กด <strong>Ctrl+P</strong> เพื่อพิมพ์ · เลือก "Save as PDF" · ปิด "Headers and footers" ใน More settings</p>
       </div>
 
       <h2>รายงานผลการสอบเข้ามหาวิทยาลัย ปีการศึกษา {yearName}</h2>

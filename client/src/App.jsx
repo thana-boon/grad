@@ -3,15 +3,10 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
-import AccountsPage from './pages/admin/AccountsPage';
-import AcademicYearsPage from './pages/admin/AcademicYearsPage';
-import StudentsPage from './pages/admin/StudentsPage';
-import UniversitiesPage from './pages/admin/UniversitiesPage';
-import FacultiesPage from './pages/admin/FacultiesPage';
 import StudentPage from './pages/StudentPage';
-import AdmissionStatusPage from './pages/admin/AdmissionStatusPage';
+// หน้าหลังบ้านทั้งหมดถูก render ผ่าน <DashboardPage activePage="..."> เพื่อให้ได้โครง
+// sidebar/topbar เดียวกัน — ที่นี่จึง import แค่หน้าที่ยืนอยู่นอกโครงแอป (print)
 import PrintReportPage from './pages/admin/PrintReportPage';
-import AdmissionTableReportPage from './pages/admin/AdmissionTableReportPage';
 import PrintAdmissionTablePage from './pages/admin/PrintAdmissionTablePage';
 
 export default function App() {

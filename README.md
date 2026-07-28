@@ -106,6 +106,54 @@ Migration อยู่ที่ [`server/database/postgres/`](server/database/po
 
 ---
 
+## 🏫 คลังมหาวิทยาลัย (seed)
+
+รายชื่อมหาวิทยาลัย / โลโก้ / คณะ / สาขา / หลักสูตร ติดไปกับ image เป็นข้อมูลตั้งต้น
+ระบบที่ deploy ใหม่จึงมีคลังครบตั้งแต่เปิดครั้งแรก ไม่ต้องไป import Excel หรือกดซิงค์วิกิพีเดียเอง
+
+| ไฟล์ | คือ |
+|---|---|
+| [`server/database/seeds/catalog.json.gz`](server/database/seeds/) | มหาวิทยาลัย + คณะ + หลักสูตร (ซ้อนเป็นชั้น ไม่เก็บ id) |
+| `server/database/seeds/logos/` | ไฟล์โลโก้ — ต้องอยู่ที่นี่ เพราะ `server/uploads/` ติด `.gitignore` + `.dockerignore` |
+| [`server/database/seed-catalog.js`](server/database/seed-catalog.js) | ตัว seed — `index.js` เรียกตอนสตาร์ทต่อจาก migration |
+
+**ลงมือเฉพาะตอนตาราง `universities` ว่างเปล่า** — ถ้าแอดมินตั้งใจลบมหาวิทยาลัยทิ้ง
+restart รอบหน้าจะไม่เอากลับมาให้ และไม่มี `DELETE` อยู่ในตัว seed เลย ของที่แก้ไว้ไม่หาย
+
+```bash
+npm run seed:catalog              # ลงให้เฉพาะตอนตารางว่าง (เหมือนตอนสตาร์ท)
+npm run seed:catalog -- --force   # เติมทับของที่มีอยู่ (ไม่ลบอะไรทิ้ง กันแถวซ้ำให้)
+```
+
+ปิด seed อัตโนมัติ: ตั้ง `CATALOG_SEED=off` ใน stack env
+
+### อัปเดตไฟล์ seed
+
+แก้คลังในหน้าแอดมินให้เรียบร้อยก่อน แล้วดึงออกมาทับไฟล์เดิม (ต้องรันที่ที่เห็นทั้ง DB และ `uploads/`):
+
+```bash
+docker exec -u root -w /app/server gradtrack-app node scripts/export-catalog-seed.js
+docker cp gradtrack-app:/app/server/database/seeds ./server/database/
+git add server/database/seeds && git commit -m "อัปเดตคลังมหาวิทยาลัย"
+```
+
+ดูข้างในไฟล์ `.gz`: `gunzip -c catalog.json.gz | head -c 2000`
+
+### ดึงจาก GradTrack ตัวเก่า
+
+[`server/scripts/import-legacy-catalog.js`](server/scripts/import-legacy-catalog.js) ดูดคลังจากระบบเก่า (MySQL) ผ่าน HTTP API เข้ามาลง Postgres
+ใช้ครั้งเดียวตอนย้ายระบบ — `GET /api/universities` ของระบบเก่าเปิดสาธารณะ แต่คณะ/หลักสูตรต้องล็อกอินก่อน
+
+```bash
+docker exec -w /app/server \
+  -e LEGACY_BASE=http://192.168.200.9:5000 -e LEGACY_USER=xxx -e LEGACY_PASS=xxx \
+  gradtrack-app node scripts/import-legacy-catalog.js
+```
+
+เสร็จแล้วค่อย export เป็นไฟล์ seed ตามขั้นตอนข้างบน
+
+---
+
 ## 🧭 กฎเรื่อง path / base path
 
 แอปเสิร์ฟใต้ subpath (`schoolos.sukhon.ac.th/gradtrack/`) โดย nginx **คง prefix ไว้** ไม่ตัดออก
@@ -135,6 +183,8 @@ gradtrack/
 │   │   ├── db.js              # pg pool + shim ให้ query หน้าตาเหมือน mysql2 เดิม
 │   │   └── schoolos.js        # SchoolOS Public API client + map เป็น snake_case
 │   ├── database/postgres/     # migration (additive เท่านั้น)
+│   ├── database/seeds/        # คลังมหาวิทยาลัย + โลโก้ ที่ติดไปกับ image
+│   ├── database/seed-catalog.js  # seed คลังตอนสตาร์ท (เฉพาะตอน DB ว่าง)
 │   ├── bootstrap.js           # งานตอนสตาร์ท — ห้าม fatal
 │   ├── scripts/check-env.js   # ตรวจ env ก่อนสตาร์ท
 │   └── seed.js                # admin local (profile "seed" เท่านั้น)

@@ -7,6 +7,8 @@ import api from '../../utils/api';
 import { absoluteBase } from '../../utils/withBase';
 import { resolveMediaUrl } from '../../utils/mediaUrl';
 import SearchableSelect from '../../components/SearchableSelect';
+import Icon from '../../components/ui/Icon';
+import { PageHeader } from '../../components/ui';
 
 // ─── Layout engine (left column only, 1 or 2 cols, up to 20 unis) ─────────────
 function getUniLayout(count) {
@@ -23,8 +25,8 @@ function getUniLayout(count) {
 // แต่ละชิ้นเก็บ { x, y, w, scale }  (รูปใช้ w แล้วสูง = w×1.5)
 export const LAYOUT_ELEMENTS = ['logo', 'school', 'congrats', 'photo', 'name'];
 export const LAYOUT_LABELS = {
-  logo: '🏫 โลโก้โรงเรียน', school: '🏫 ชื่อโรงเรียน', congrats: '📝 ข้อความยินดี',
-  photo: '👤 รูปนักเรียน', name: '🏷️ ชื่อนักเรียน',
+  logo: 'โลโก้โรงเรียน', school: 'ชื่อโรงเรียน', congrats: 'ข้อความยินดี',
+  photo: 'รูปนักเรียน', name: 'ชื่อนักเรียน',
 };
 // ค่าเริ่มต้น — วางให้ใกล้เคียงเลย์เอาต์เดิม (โลโก้มุมบนซ้าย, ข้อความบนกลาง, รูป+ชื่อฝั่งขวา)
 export const DEFAULT_LAYOUT = {
@@ -228,7 +230,13 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
                   transformOrigin: 'center top',
                 }}
               />
-          : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 100 }}>👤</div>
+          : (
+            // ไม่มีรูป → วาง silhouette เส้น (SVG) ไม่ใช้ emoji เพราะ emoji จะติดลงไปในภาพ export
+            // แล้วหน้าตาไม่เหมือนกันในแต่ละเครื่อง
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="user" size={140} strokeWidth={1.2} style={{ color: 'rgba(255,255,255,0.28)' }} />
+            </div>
+          )
         }
       </div>
 
@@ -269,7 +277,13 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
             borderRadius: 14, padding: '12px 16px',
             textAlign: 'center', width: '100%', boxSizing: 'border-box', marginTop: 14,
           }}>
-            <div style={{ fontSize: 13, opacity: 0.8, marginBottom: 4 }}>✅ ยืนยันสิทธิ์</div>
+            <div style={{
+              fontSize: 13, opacity: 0.85, marginBottom: 4,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+            }}>
+              <Icon name="check" size={14} strokeWidth={2.6} />
+              ยืนยันสิทธิ์
+            </div>
             <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3 }}>
               {confirmedUni.university_name}
             </div>
@@ -418,10 +432,11 @@ function DragResizeBox({ x, y, w, h, scale, curScale, label, selected, overridde
         position: 'absolute', top: -20, left: -2,
         fontSize: 10, lineHeight: '16px', whiteSpace: 'nowrap',
         padding: '0 6px', borderRadius: 4,
-        background: selected ? '#3b82f6' : 'rgba(59,130,246,0.75)', color: '#fff',
+        background: selected ? '#5b2d8e' : 'rgba(91,45,142,0.78)', color: '#fff',
         display: 'flex', alignItems: 'center', gap: 4,
       }}>
-        {label}{overridden && <span style={{ fontSize: 9 }}>🎨</span>}
+        {label}
+        {overridden && <Icon name="star" size={9} strokeWidth={2.4} style={{ color: '#F5C518' }} />}
       </div>
 
       {selected && onReset && (
@@ -429,12 +444,15 @@ function DragResizeBox({ x, y, w, h, scale, curScale, label, selected, overridde
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onReset(); }}
           title="รีเซ็ตตำแหน่ง/ขนาดชิ้นนี้"
+          aria-label="รีเซ็ตตำแหน่งและขนาดของชิ้นนี้"
           style={{
             position: 'absolute', top: -20, right: -2,
-            fontSize: 10, lineHeight: '16px', padding: '0 6px', borderRadius: 4,
-            background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer',
+            lineHeight: 0, padding: '3px 5px', borderRadius: 4,
+            background: '#dc2626', color: '#fff', border: 'none', cursor: 'pointer',
           }}
-        >↺</button>
+        >
+          <Icon name="refresh" size={11} strokeWidth={2.2} />
+        </button>
       )}
 
       {/* จุดปรับขนาด มุมล่างขวา */}
@@ -573,7 +591,7 @@ export default function ReportPage() {
         showToast(`บันทึกค่ากลางแล้ว แต่ค่าเฉพาะรายคน ${failed.length} คนไม่สำเร็จ`, 'error');
       } else {
         setDirtyCodes(new Set());
-        showToast(codes.length > 0 ? `บันทึกสำเร็จ (รวมเฉพาะคน ${codes.length} คน) ✅` : 'บันทึกสำเร็จ ✅');
+        showToast(codes.length > 0 ? `บันทึกสำเร็จ (รวมเฉพาะคน ${codes.length} คน)` : 'บันทึกสำเร็จ');
       }
     } catch (err) {
       console.error('บันทึกการตั้งค่าไม่สำเร็จ', err);
@@ -1061,59 +1079,90 @@ export default function ReportPage() {
   }, [editLayout]);
 
   return (
-    <div className="p-4 flex flex-col gap-4 min-h-screen">
+    <div className="flex flex-col">
       {/* Toast */}
       {toast && (
-        <div className="toast toast-top toast-end z-[100000]">
-          <div className={`alert alert-${toast.type === 'error' ? 'error' : 'success'} py-2 text-sm`}>
-            {toast.msg}
+        <div className="toast toast-top toast-end z-[100000]" role="status" aria-live="polite">
+          <div
+            className={`alert ${toast.type === 'error' ? 'alert-error' : 'alert-success'} anim-scale-in py-2.5 text-sm shadow-lg`}
+          >
+            <Icon name={toast.type === 'error' ? 'alert' : 'checkCircle'} size={16} />
+            <span>{toast.msg}</span>
           </div>
         </div>
       )}
 
-      <h1 className="text-xl font-bold">📊 รายงานผลการสอบ</h1>
+      <PageHeader
+        icon="chart"
+        title="รายงานผลการสอบ"
+        subtitle="ออกแบบการ์ดรายงานรายคน แล้วส่งออกเป็นรูปภาพหรือ PDF"
+      />
 
       {/* Full-screen overlay during export — hides the card rendered at top-left for html2canvas */}
       {exporting && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 99999,
-          background: 'rgba(0,0,0,0.75)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20,
-          color: 'white', fontFamily: 'Prompt, sans-serif',
-        }}>
-          <span className="loading loading-spinner loading-lg" />
-          <p style={{ fontSize: 20 }}>กำลัง export... {exportProgress}%</p>
-          <progress className="progress progress-primary w-64" value={exportProgress} max={100} />
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 99999,
+            background: 'rgba(26,16,42,0.82)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18,
+            color: 'white',
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="loading loading-spinner loading-lg text-[#F5C518]" />
+          <p style={{ fontSize: 18, fontWeight: 500 }}>
+            กำลังสร้างไฟล์... <span className="tabular-nums">{exportProgress}%</span>
+          </p>
+          <div className="h-1.5 w-64 overflow-hidden rounded-full bg-white/15">
+            <div
+              className="h-full rounded-full bg-[#F5C518] transition-[width] duration-200"
+              style={{ width: `${exportProgress}%` }}
+            />
+          </div>
+          <p style={{ fontSize: 12, opacity: 0.6 }}>อย่าปิดหน้านี้จนกว่าจะเสร็จ</p>
         </div>
       )}
 
       {/* ── Modal จัดวางอิสระ (ลากย้าย/ปรับขนาดชิ้นบนการ์ด) ── */}
       {editLayout && previewStudent && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 90000, background: 'rgba(0,0,0,0.65)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 90000, background: 'rgba(26,16,42,0.7)', display: 'flex', flexDirection: 'column' }}>
           {/* Header */}
-          <div className="bg-base-100 border-b border-base-300 px-4 py-2.5 flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-sm shrink-0">✋ จัดวางอิสระ</span>
+          <div className="flex flex-wrap items-center gap-2 border-b border-base-300 bg-base-100 px-4 py-2.5">
+            <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold">
+              <Icon name="settings" size={15} className="text-primary" />
+              จัดวางอิสระ
+            </span>
             <div className="join shrink-0">
               <button
                 className={`btn btn-xs join-item ${!perStudent ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setPerStudent(false)}
+                aria-pressed={!perStudent}
               >ทุกคน</button>
               <button
-                className={`btn btn-xs join-item ${perStudent ? 'btn-secondary' : 'btn-outline'}`}
+                className={`btn btn-xs join-item ${perStudent ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => setPerStudent(true)}
                 disabled={!previewCode}
+                aria-pressed={perStudent}
               >เฉพาะคนนี้</button>
             </div>
-            {editingStudent && <span className="badge badge-secondary badge-xs shrink-0">🎨 {previewStudent.first_name}</span>}
-            <div className="flex items-center gap-1.5 ml-auto min-w-0">
+            {editingStudent && (
+              <span className="badge badge-gold badge-xs shrink-0 gap-1">
+                <Icon name="star" size={10} strokeWidth={2.4} />
+                {previewStudent.first_name}
+              </span>
+            )}
+            <div className="ml-auto flex min-w-0 items-center gap-1.5">
               <button
                 className="btn btn-outline btn-xs btn-square shrink-0"
                 onClick={() => setPreviewIndex(i => Math.max(0, i - 1))}
                 disabled={previewIndex <= 0}
-                title="คนก่อนหน้า"
-              >‹</button>
+                aria-label="คนก่อนหน้า"
+              >
+                <Icon name="chevronLeft" size={13} />
+              </button>
               <SearchableSelect
-                className="w-40 sm:w-56 min-w-0"
+                className="w-40 min-w-0 sm:w-56"
                 value={previewIndex}
                 onChange={setPreviewIndex}
                 placeholder="เลือกนักเรียน..."
@@ -1122,7 +1171,7 @@ export default function ReportPage() {
                   const tuned = ov && (PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined) || (ov.layout && Object.keys(ov.layout).length > 0));
                   return {
                     value: i,
-                    label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
+                    label: `${tuned ? '★ ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
                   };
                 })}
               />
@@ -1130,8 +1179,10 @@ export default function ReportPage() {
                 className="btn btn-outline btn-xs btn-square shrink-0"
                 onClick={() => setPreviewIndex(i => Math.min(students.length - 1, i + 1))}
                 disabled={previewIndex >= students.length - 1}
-                title="คนถัดไป"
-              >›</button>
+                aria-label="คนถัดไป"
+              >
+                <Icon name="chevronRight" size={13} />
+              </button>
               <span className="text-xs text-base-content/50 tabular-nums whitespace-nowrap shrink-0">
                 {previewIndex + 1}/{students.length}
               </span>
@@ -1154,18 +1205,23 @@ export default function ReportPage() {
           </div>
 
           {/* Footer */}
-          <div className="bg-base-100 border-t border-base-300 px-4 py-2.5 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-base-content/60 min-w-0">
-              ✋ ลากกลาง = ย้าย • ลากมุมขวาล่าง = ปรับขนาด • คลิกที่ว่าง = ยกเลิกเลือก • ↺ บนกล่อง = รีเซ็ตชิ้นนั้น
+          <div className="flex flex-wrap items-center gap-2 border-t border-base-300 bg-base-100 px-4 py-2.5">
+            <span className="min-w-0 text-xs text-base-content/60">
+              ลากกลาง = ย้าย • ลากมุมขวาล่าง = ปรับขนาด • คลิกที่ว่าง = ยกเลิกเลือก • ปุ่มรีเซ็ตบนกล่อง = คืนค่าชิ้นนั้น
             </span>
-            <div className="flex items-center gap-2 ml-auto shrink-0">
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               <button
-                className="btn btn-primary btn-sm"
+                className="btn btn-primary btn-sm gap-1.5"
                 onClick={saveSettings}
                 disabled={saving}
                 title="บันทึกตำแหน่ง/ขนาดทั้งหมด"
               >
-                {saving ? <span className="loading loading-spinner loading-xs" /> : `💾 บันทึก${dirtyCodes.size > 0 ? ` (+เฉพาะคน ${dirtyCodes.size})` : ''}`}
+                {saving ? (
+                  <span className="loading loading-spinner loading-xs" />
+                ) : (
+                  <Icon name="save" size={15} />
+                )}
+                บันทึก{dirtyCodes.size > 0 ? ` (+เฉพาะคน ${dirtyCodes.size})` : ''}
               </button>
               <button
                 className="btn btn-ghost btn-sm"
@@ -1178,37 +1234,57 @@ export default function ReportPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
         {/* ── Settings Panel ── */}
-        <div className="card bg-base-100 shadow border border-base-300 h-fit overflow-hidden">
+        <div className="card h-fit overflow-hidden bg-base-100">
           {/* Header */}
-          <div className="px-4 py-3 border-b border-base-300 bg-base-200/50">
-            <h2 className="font-semibold text-base">⚙️ ตั้งค่ารายงาน</h2>
+          <div className="flex items-center gap-2.5 border-b border-base-300 bg-base-200/50 px-4 py-3">
+            <span className="gt-chip size-8">
+              <Icon name="settings" size={16} />
+            </span>
+            <h2 className="text-sm font-semibold">ตั้งค่ารายงาน</h2>
           </div>
 
-          <div className="p-4 flex flex-col gap-5">
+          <div className="flex flex-col gap-5 p-4">
 
             {/* ── Section: โรงเรียน ── */}
             <section className="flex flex-col gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">🏫 โรงเรียน</p>
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-base-content/45">
+                <Icon name="building" size={13} />
+                โรงเรียน
+              </p>
 
               {/* School logo — compact row */}
               <div className="flex items-center gap-3">
-                <div className="w-16 h-16 shrink-0 rounded-lg border border-base-300 bg-base-200 flex items-center justify-center overflow-hidden">
-                  {settings.school_logo_url
-                    ? <img src={resolveMediaUrl(settings.school_logo_url)} alt="logo" className="w-full h-full object-contain p-1" />
-                    : <span className="text-2xl opacity-30">🏫</span>}
+                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-base-300 bg-base-200">
+                  {settings.school_logo_url ? (
+                    <img
+                      src={resolveMediaUrl(settings.school_logo_url)}
+                      alt="โลโก้โรงเรียน"
+                      className="h-full w-full object-contain p-1"
+                    />
+                  ) : (
+                    <Icon name="building" size={22} className="text-base-content/25" />
+                  )}
                 </div>
-                <div className="flex flex-col gap-1 flex-1">
+                <div className="flex flex-1 flex-col gap-1">
                   <span className="text-xs text-base-content/60">โลโก้โรงเรียน</span>
                   <div className="flex gap-1">
                     <button
-                      className="btn btn-outline btn-xs"
+                      className="btn btn-outline btn-xs gap-1"
                       onClick={() => logoInputRef.current?.click()}
                       disabled={logoUploading}
                     >
-                      {logoUploading ? <span className="loading loading-spinner loading-xs" /> : (settings.school_logo_url ? 'เปลี่ยน' : 'อัพโหลด')}
+                      {logoUploading ? (
+                        <span className="loading loading-spinner loading-xs" />
+                      ) : (
+                        <Icon name="upload" size={12} />
+                      )}
+                      {settings.school_logo_url ? 'เปลี่ยน' : 'อัปโหลด'}
                     </button>
                     {settings.school_logo_url && (
-                      <button className="btn btn-ghost btn-xs text-error" onClick={removeSchoolLogo}>ลบ</button>
+                      <button className="btn btn-ghost btn-xs gap-1 text-error" onClick={removeSchoolLogo}>
+                        <Icon name="trash" size={12} />
+                        ลบ
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1216,11 +1292,12 @@ export default function ReportPage() {
               </div>
 
               {/* School name */}
-              <div className="form-control gap-1">
-                <label className="label py-0"><span className="label-text text-xs">ชื่อโรงเรียน</span></label>
+              <div>
+                <label htmlFor="rp-school" className="label">ชื่อโรงเรียน</label>
                 <input
+                  id="rp-school"
                   type="text"
-                  className="input input-bordered input-sm text-sm"
+                  className="input input-sm w-full"
                   value={settings.school_name || ''}
                   onChange={e => setSettings(p => ({ ...p, school_name: e.target.value }))}
                   placeholder="โรงเรียน..."
@@ -1232,7 +1309,10 @@ export default function ReportPage() {
 
             {/* ── Section: เนื้อหาบนการ์ด ── */}
             <section className="flex flex-col gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">📝 เนื้อหาบนการ์ด</p>
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-base-content/45">
+                <Icon name="file" size={13} />
+                เนื้อหาบนการ์ด
+              </p>
 
               {/* Congrats text */}
               <div className="form-control gap-1">
@@ -1291,9 +1371,10 @@ export default function ReportPage() {
                       onClick={() => setPerStudent(false)}
                     >ทุกคน</button>
                     <button
-                      className={`btn btn-xs join-item flex-1 ${perStudent ? 'btn-secondary' : 'btn-outline'}`}
+                      className={`btn btn-xs join-item flex-1 ${perStudent ? 'btn-primary' : 'btn-outline'}`}
                       onClick={() => setPerStudent(true)}
                       disabled={!previewCode}
+                      aria-pressed={perStudent}
                     >เฉพาะคนนี้</button>
                   </div>
                   <p className="text-[10px] leading-relaxed text-base-content/50">
@@ -1304,8 +1385,9 @@ export default function ReportPage() {
                       : 'ค่าเหล่านี้ใช้กับนักเรียนทุกคน ยกเว้นคนที่ตั้งค่าเฉพาะไว้'}
                   </p>
                   {editingStudent && hasOverride && (
-                    <button className="btn btn-ghost btn-xs text-error self-start" onClick={clearOverride}>
-                      ↺ ล้างค่าเฉพาะคนนี้ (กลับไปใช้ค่ากลาง)
+                    <button className="btn btn-ghost btn-xs gap-1 self-start text-error" onClick={clearOverride}>
+                      <Icon name="refresh" size={12} />
+                      ล้างค่าเฉพาะคนนี้ (กลับไปใช้ค่ากลาง)
                     </button>
                   )}
                 </div>
@@ -1424,7 +1506,10 @@ export default function ReportPage() {
 
             {/* ── Section: รูปแบบ & ดีไซน์ ── */}
             <section className="flex flex-col gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-base-content/40">🎨 รูปแบบ & ดีไซน์</p>
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-base-content/45">
+                <Icon name="image" size={13} />
+                รูปแบบ & ดีไซน์
+              </p>
 
               {/* Text color */}
               <div className="flex items-center justify-between gap-2">
@@ -1542,7 +1627,12 @@ export default function ReportPage() {
                     onClick={() => bgInputRef.current?.click()}
                     disabled={bgUploading}
                   >
-                    {bgUploading ? <span className="loading loading-spinner loading-xs" /> : '📷 เลือกภาพพื้นหลัง'}
+                    {bgUploading ? (
+                      <span className="loading loading-spinner loading-xs" />
+                    ) : (
+                      <Icon name="image" size={15} />
+                    )}
+                    เลือกภาพพื้นหลัง
                   </button>
                 )}
                 <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={uploadBg} />
@@ -1551,44 +1641,53 @@ export default function ReportPage() {
           </div>
 
           {/* Sticky save footer */}
-          <div className="px-4 py-3 border-t border-base-300 bg-base-200/50">
+          <div className="border-t border-base-300 bg-base-200/50 px-4 py-3">
             <button
-              className="btn btn-primary btn-sm w-full"
+              className="btn btn-primary btn-sm w-full gap-1.5"
               onClick={saveSettings}
               disabled={saving}
             >
-              {saving
-                ? <span className="loading loading-spinner loading-xs" />
-                : `💾 บันทึกการตั้งค่า${dirtyCodes.size > 0 ? ` (+ เฉพาะคน ${dirtyCodes.size} คน)` : ''}`}
+              {saving ? (
+                <span className="loading loading-spinner loading-xs" />
+              ) : (
+                <Icon name="save" size={15} />
+              )}
+              บันทึกการตั้งค่า{dirtyCodes.size > 0 ? ` (+ เฉพาะคน ${dirtyCodes.size} คน)` : ''}
             </button>
           </div>
         </div>
 
         {/* ── Preview Panel ── */}
         <div className="flex flex-col gap-3">
-          <div className="card bg-base-100 shadow border border-base-300 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2 shrink-0">
-                <h2 className="font-semibold text-base">👁️ ตัวอย่างรายงาน</h2>
+          <div className="card bg-base-100 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="gt-chip size-8">
+                  <Icon name="eye" size={16} />
+                </span>
+                <h2 className="text-sm font-semibold sm:text-base">ตัวอย่างรายงาน</h2>
                 <button
-                  className="btn btn-xs btn-primary gap-1"
+                  className="btn btn-primary btn-xs gap-1"
                   onClick={() => { setEditLayout(true); setSelectedEl(null); }}
                   disabled={!previewStudent}
                   title="เปิดหน้าต่างใหญ่สำหรับลากย้าย/ปรับขนาด โลโก้ ข้อความ รูป ชื่อ ได้อิสระ"
                 >
-                  ✋ ลากวางอิสระ
+                  <Icon name="settings" size={12} />
+                  ลากวางอิสระ
                 </button>
               </div>
               {students.length > 0 && (
-                <div className="flex items-center gap-1.5 min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <button
                     className="btn btn-outline btn-sm btn-square shrink-0"
                     onClick={() => setPreviewIndex(i => Math.max(0, i - 1))}
                     disabled={previewIndex <= 0}
-                    title="คนก่อนหน้า"
-                  >‹</button>
+                    aria-label="คนก่อนหน้า"
+                  >
+                    <Icon name="chevronLeft" size={15} />
+                  </button>
                   <SearchableSelect
-                    className="w-40 sm:w-56 min-w-0"
+                    className="w-40 min-w-0 sm:w-56"
                     value={previewIndex}
                     onChange={setPreviewIndex}
                     placeholder="เลือกนักเรียน..."
@@ -1597,7 +1696,7 @@ export default function ReportPage() {
                       const tuned = ov && PER_STUDENT_KEYS.some(k => ov[k] !== null && ov[k] !== undefined);
                       return {
                         value: i,
-                        label: `${tuned ? '🎨 ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
+                        label: `${tuned ? '★ ' : ''}${s.title_prefix || ''}${s.first_name} ${s.last_name} (${s.student_code})`,
                       };
                     })}
                   />
@@ -1605,9 +1704,11 @@ export default function ReportPage() {
                     className="btn btn-outline btn-sm btn-square shrink-0"
                     onClick={() => setPreviewIndex(i => Math.min(students.length - 1, i + 1))}
                     disabled={previewIndex >= students.length - 1}
-                    title="คนถัดไป"
-                  >›</button>
-                  <span className="text-xs text-base-content/50 tabular-nums whitespace-nowrap shrink-0">
+                    aria-label="คนถัดไป"
+                  >
+                    <Icon name="chevronRight" size={15} />
+                  </button>
+                  <span className="shrink-0 whitespace-nowrap text-xs tabular-nums text-base-content/50">
                     {previewIndex + 1}/{students.length}
                   </span>
                 </div>
@@ -1615,9 +1716,13 @@ export default function ReportPage() {
             </div>
 
             {loading ? (
-              <div className="flex justify-center py-20"><span className="loading loading-spinner loading-lg" /></div>
+              <div className="flex justify-center py-16">
+                <span className="gt-skeleton block aspect-square w-full max-w-md rounded-xl" />
+              </div>
             ) : !previewStudent ? (
-              <p className="text-center text-base-content/40 py-20">ไม่มีนักเรียนที่บันทึกผล</p>
+              <p className="py-20 text-center text-sm text-base-content/45">
+                ไม่มีนักเรียนที่บันทึกผลในปีการศึกษานี้
+              </p>
             ) : (
               <div className="flex justify-center overflow-hidden">
                 {/* Scaled preview wrapper */}
@@ -1638,11 +1743,13 @@ export default function ReportPage() {
           </div>
 
           {/* ── Export Section ── */}
-          <div className="card bg-base-100 shadow border border-base-300 p-4">
+          <div className="card bg-base-100 p-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="flex flex-col items-center justify-center w-16 shrink-0 rounded-lg bg-primary/10 py-1.5">
-                  <span className="text-2xl font-bold leading-none text-primary">{students.length}</span>
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="flex w-16 shrink-0 flex-col items-center justify-center rounded-xl bg-primary/10 py-1.5">
+                  <span className="text-2xl font-semibold leading-none tabular-nums text-primary">
+                    {students.length}
+                  </span>
                   <span className="text-[10px] text-base-content/60">คน</span>
                 </div>
                 <div className="min-w-0">
@@ -1653,79 +1760,96 @@ export default function ReportPage() {
 
               {/* Progress */}
               {exporting && (
-                <div className="flex items-center gap-2 text-sm opacity-60">
+                <div className="flex items-center gap-2 text-sm text-base-content/60">
                   <span className="loading loading-spinner loading-xs" />
-                  {exportProgress}%
+                  <span className="tabular-nums">{exportProgress}%</span>
                 </div>
               )}
 
-              <div className="flex flex-wrap gap-2 w-full sm:w-auto sm:justify-end">
-                <button
-                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={() => openInNewTab()}
-                  disabled={!previewStudent}
-                  title="เปิดการ์ดคนนี้ในแท็บใหม่ (เรนเดอร์ด้วยเบราว์เซอร์ — สวยเป๊ะ, กด Ctrl+P สั่งพิมพ์/เซฟ PDF ได้)"
-                >
-                  🖼️ เปิดคนนี้
-                </button>
-                <button
-                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={() => openInNewTab(students)}
-                  disabled={students.length === 0}
-                  title="เปิดการ์ดทุกคนในแท็บใหม่ (สวยเป๊ะ, กด Ctrl+P แล้วเลือก Save as PDF ได้ทั้งชั้น)"
-                >
-                  🗂️ เปิดทุกคน
-                </button>
-                <button
-                  className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={exportOnePdf}
-                  disabled={exporting || !previewStudent}
-                  title="เซฟการ์ดคนนี้เป็น PDF จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่านหน้าปริ้น ไม่โดนย่อ A4"
-                >
-                  📄 เซฟ PDF คนนี้
-                </button>
-                <button
-                  className="btn btn-outline btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={exportOne}
-                  disabled={exporting || !previewStudent}
-                  title="ดาวน์โหลดเฉพาะคนที่พรีวิวอยู่ เป็นรูป PNG"
-                >
-                  🖼️ PNG คนนี้
-                </button>
-                <button
-                  className="btn btn-primary btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={exportZip}
-                  disabled={exporting || students.length === 0}
-                >
-                  📦 Export ZIP
-                </button>
-                <button
-                  className="btn btn-secondary btn-sm gap-2 flex-1 sm:flex-none"
-                  onClick={exportPdf}
-                  disabled={exporting || students.length === 0}
-                >
-                  📄 Export PDF
-                </button>
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+                {[
+                  {
+                    label: 'เปิดคนนี้', icon: 'link', variant: 'btn-outline',
+                    onClick: () => openInNewTab(), disabled: !previewStudent,
+                    title: 'เปิดการ์ดคนนี้ในแท็บใหม่ (เรนเดอร์ด้วยเบราว์เซอร์ — สวยเป๊ะ, กด Ctrl+P สั่งพิมพ์/เซฟ PDF ได้)',
+                  },
+                  {
+                    label: 'เปิดทุกคน', icon: 'copy', variant: 'btn-outline',
+                    onClick: () => openInNewTab(students), disabled: students.length === 0,
+                    title: 'เปิดการ์ดทุกคนในแท็บใหม่ (สวยเป๊ะ, กด Ctrl+P แล้วเลือก Save as PDF ได้ทั้งชั้น)',
+                  },
+                  {
+                    label: 'PDF คนนี้', icon: 'file', variant: 'btn-outline',
+                    onClick: exportOnePdf, disabled: exporting || !previewStudent,
+                    title: 'เซฟการ์ดคนนี้เป็น PDF จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่านหน้าปริ้น ไม่โดนย่อ A4',
+                  },
+                  {
+                    label: 'PNG คนนี้', icon: 'image', variant: 'btn-outline',
+                    onClick: exportOne, disabled: exporting || !previewStudent,
+                    title: 'ดาวน์โหลดเฉพาะคนที่พรีวิวอยู่ เป็นรูป PNG',
+                  },
+                  {
+                    label: 'Export ZIP', icon: 'download', variant: 'btn-primary',
+                    onClick: exportZip, disabled: exporting || students.length === 0,
+                    title: 'ดาวน์โหลดการ์ดทุกคนเป็นไฟล์ ZIP',
+                  },
+                  {
+                    label: 'Export PDF', icon: 'print', variant: 'btn-primary',
+                    onClick: exportPdf, disabled: exporting || students.length === 0,
+                    title: 'รวมการ์ดทุกคนเป็นไฟล์ PDF เดียว',
+                  },
+                ].map((b) => (
+                  <button
+                    key={b.label}
+                    className={`btn btn-sm flex-1 gap-1.5 sm:flex-none ${b.variant}`}
+                    onClick={b.onClick}
+                    disabled={b.disabled}
+                    title={b.title}
+                  >
+                    <Icon name={b.icon} size={15} />
+                    {b.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
 
           {/* ── Quote Approval ── */}
           {students.some(s => s.quote) && (
-            <div className="card bg-base-100 shadow border border-base-300 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-semibold text-base">💬 อนุมัติคำคม</h2>
-                <div className="flex gap-2">
-                  <button className="btn btn-ghost btn-xs" onClick={() => setApprovedQuotes(new Set(students.map(s => s.student_code)))}>เลือกทั้งหมด</button>
-                  <button className="btn btn-ghost btn-xs" onClick={() => setApprovedQuotes(new Set())}>ยกเลิกทั้งหมด</button>
+            <div className="card bg-base-100 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <span className="gt-chip size-8">
+                    <Icon name="sparkle" size={16} />
+                  </span>
+                  <h2 className="text-sm font-semibold sm:text-base">อนุมัติคำคม</h2>
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setApprovedQuotes(new Set(students.map(s => s.student_code)))}
+                  >
+                    เลือกทั้งหมด
+                  </button>
+                  <button className="btn btn-ghost btn-xs" onClick={() => setApprovedQuotes(new Set())}>
+                    ยกเลิกทั้งหมด
+                  </button>
                 </div>
               </div>
-              <input
-                className="input input-bordered input-xs w-full mb-2"
-                placeholder="🔍 ค้นหาชื่อนักเรียน..."
-                value={quoteSearch}
-                onChange={e => setQuoteSearch(e.target.value)}
-              />
+              <div className="relative mb-2">
+                <Icon
+                  name="search"
+                  size={13}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-base-content/40"
+                />
+                <input
+                  className="input input-xs w-full pl-7"
+                  placeholder="ค้นหาชื่อนักเรียน..."
+                  value={quoteSearch}
+                  onChange={e => setQuoteSearch(e.target.value)}
+                  aria-label="ค้นหาชื่อนักเรียน"
+                />
+              </div>
               {(() => {
                 const filtered = students.filter(s => s.quote && (
                   `${s.first_name} ${s.last_name}`.toLowerCase().includes(quoteSearch.toLowerCase()) ||

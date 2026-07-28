@@ -4,12 +4,15 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GradTrack</title>
+    <meta name="theme-color" content="#341a54" />
+    <meta name="description" content="GradTrack — ระบบติดตามผลการสอบเข้ามหาวิทยาลัยของนักเรียน ม.6" />
+    <title>GradTrack — ระบบติดตามผลการสอบเข้ามหาวิทยาลัย</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- crossorigin จำเป็นสำหรับหน้า Report: ให้ modern-screenshot อ่าน @font-face แล้วฝังฟอนต์ลงภาพ export ได้
-         และโหลดน้ำหนัก 700 ด้วย เพราะการ์ดรายงานใช้ตัวหนา 700 จริง -->
-    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
+    <!-- IBM Plex Sans Thai = ฟอนต์ประจำระบบตาม CI ของ SchoolOS
+         crossorigin จำเป็นสำหรับหน้า Report: ให้ modern-screenshot อ่าน @font-face แล้วฝังฟอนต์ลงภาพ export ได้
+         (หน้า print/export ยัง @import Prompt ของตัวเองไว้ เพราะเลย์เอาต์ถูกจูนกับฟอนต์นั้น) -->
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
   </head>
   <body>
     <div id="root"></div>

@@ -8,6 +8,7 @@ require('./config/env');
 const logger = require('./config/logger');
 const db = require('./config/db');
 const { migrate } = require('./database/migrate');
+const { seedCatalog } = require('./database/seed-catalog');
 const { bootstrap } = require('./bootstrap');
 
 const app = express();
@@ -125,6 +126,16 @@ if (BASE_PATH) {
     logger.error('Migration ล้มเหลว — ไม่สตาร์ต server', { error: err.message });
     process.exit(1);
   }
+
+  // seed คลังมหาวิทยาลัย/คณะ/หลักสูตร + โลโก้ ให้ระบบที่ยังไม่มีข้อมูล
+  // ลงมือเฉพาะตอนตาราง universities ว่างเปล่า และไม่ลบอะไรทิ้งเลย (ดู database/seed-catalog.js)
+  // ห้าม fatal ด้วยเหตุผลเดียวกับ bootstrap — เป็นข้อมูลตั้งต้น ไม่ใช่เงื่อนไขให้แอปขึ้น
+  await seedCatalog(db)
+    .then((r) => {
+      if (r.skipped) logger.info(`ข้าม seed คลังมหาวิทยาลัย: ${r.skipped}`);
+      else logger.info(`Seed คลังมหาวิทยาลัยสำเร็จ (มหาวิทยาลัย ${r.universities} / โลโก้ ${r.logos} / คณะ ${r.faculties} / หลักสูตร ${r.programs})`);
+    })
+    .catch((err) => logger.warn('Seed คลังมหาวิทยาลัยข้ามไป', { error: err.message }));
 
   // bootstrap ห้าม fatal: เป็นข้อมูลอำนวยความสะดวก ไม่ใช่เงื่อนไขให้ระบบทำงาน
   // ถ้า SchoolOS ล่มตอนสตาร์ท แอปต้องขึ้นได้ตามปกติแล้วค่อยไปดึงตอนมีคนใช้
