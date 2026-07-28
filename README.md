@@ -174,7 +174,7 @@ docker exec -w /app/server \
 ## 📁 โครงสร้าง
 
 ```
-gradtrack/
+grad/
 ├── client/                    # React + Vite
 │   └── src/utils/withBase.js  # ตัวเดียวที่ประกอบ path ฝั่ง client
 ├── server/
