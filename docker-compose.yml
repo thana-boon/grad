@@ -34,7 +34,9 @@ services:
       DATABASE_URL: postgres://${GRADUATE_DB_USER:-graduate}:${GRADUATE_DB_PASSWORD:?ต้องตั้ง GRADUATE_DB_PASSWORD ใน Portainer stack env}@${GRADUATE_DB_HOST:-postgres-core}:${GRADUATE_DB_PORT:-5432}/${GRADUATE_DB_NAME:-graduate}
 
       JWT_SECRET: ${JWT_SECRET:?ต้องตั้ง JWT_SECRET ใน Portainer stack env (สุ่มยาว ๆ เช่น openssl rand -hex 32)}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      # อายุ session สูงสุด — ครบเมื่อไรก็หลุด ต่อให้ยังใช้งานอยู่
+      # (อีกชั้นคือ "ไม่ขยับ 30 นาทีแล้วหลุด" ซึ่งอยู่ฝั่งหน้าเว็บ แก้ที่โค้ด ไม่ใช่ env)
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
 
       # SchoolOS Public API — ครูและนักเรียนล็อกอินผ่านตัวนี้
       SCHOOLOS_API_BASE: ${SCHOOLOS_API_BASE:-http://192.168.200.56:3002}

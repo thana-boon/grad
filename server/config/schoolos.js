@@ -290,6 +290,26 @@ async function listTeachers(params = {}) {
   };
 }
 
+/** ดึงครูทุกหน้า (วนตาม pagination เหมือน listAllStudents) */
+async function listAllTeachers(params = {}) {
+  const limit = Math.min(Number(params.limit) || MAX_PAGE_SIZE, MAX_PAGE_SIZE);
+  let page = 1;
+  const all = [];
+
+  for (;;) {
+    const { data, meta } = await listTeachers({ ...params, page, limit });
+    if (!Array.isArray(data) || data.length === 0) break;
+    all.push(...data);
+
+    const total = meta?.total ?? all.length;
+    if (all.length >= total || data.length < limit) break;
+    page += 1;
+    if (page > 50) break; // กันลูปไม่รู้จบ (ครูทั้งโรงเรียนไม่ถึง 10,000 คนแน่ ๆ)
+  }
+
+  return all;
+}
+
 // ─── auth/verify ─────────────────────────────────────────────────────────────
 /**
  * ตรวจรหัสผ่านกับ SchoolOS — endpoint นี้ "ตรวจอย่างเดียว ไม่ออก token"
@@ -343,6 +363,7 @@ module.exports = {
   getAcademicYears,
   getAcademicYearById,
   listTeachers,
+  listAllTeachers,
   verify,
   me,
   SosKeyError,

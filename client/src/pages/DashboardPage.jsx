@@ -19,7 +19,7 @@ import ActivityLogPage from './admin/ActivityLogPage';
 // กดไปก็ได้ 403 กลับมา — ซ่อนตั้งแต่แรกดีกว่าให้เจอหน้าพัง)
 const ADMIN_MENU = [
   { key: 'dashboard', label: 'ภาพรวม', path: '/dashboard', icon: 'dashboard' },
-  { key: 'accounts', label: 'จัดการ Account', path: '/admin/accounts', icon: 'users', adminOnly: true },
+  { key: 'accounts', label: 'จัดการผู้ใช้งาน', path: '/admin/accounts', icon: 'users', adminOnly: true },
   { key: 'academic-years', label: 'ปีการศึกษา', path: '/admin/academic-years', icon: 'calendar' },
   { key: 'students', label: 'รายชื่อนักเรียน', path: '/admin/students', icon: 'graduation' },
   { key: 'universities', label: 'มหาวิทยาลัย', path: '/admin/universities', icon: 'university' },

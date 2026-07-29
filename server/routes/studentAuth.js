@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
+const { signToken } = require('../config/jwt');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -218,11 +218,11 @@ router.post('/login', loginLimiter, async (req, res) => {
       [student.student_code]
     );
 
-    const token = jwt.sign(
-      { student_code: student.student_code, username: paddedCode, role: 'student' },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
+    const token = signToken({
+      student_code: student.student_code,
+      username: paddedCode,
+      role: 'student',
+    });
 
     logger.info('Student login success', { student_code: student.student_code, via, ip: req.ip });
     logActivity({

@@ -12,15 +12,23 @@ function verifyToken(req, res, next) {
   const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
 
   if (!token) {
-    return res.status(401).json({ message: 'ไม่พบ token กรุณาเข้าสู่ระบบ' });
+    return res.status(401).json({ message: 'ไม่พบ token กรุณาเข้าสู่ระบบ', code: 'NO_TOKEN' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; // { id?, student_code?, username, role }
     next();
-  } catch {
-    return res.status(401).json({ message: 'Token ไม่ถูกต้องหรือหมดอายุ' });
+  } catch (err) {
+    // แยก "หมดอายุ" ออกจาก "ไม่ถูกต้อง" — อย่างแรกคือเรื่องปกติของ session ที่ครบเวลา
+    // อย่างหลังแปลว่า token ถูกแก้ หรือ JWT_SECRET เปลี่ยน ซึ่งควรตามดูใน log
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        message: 'เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่',
+        code: 'TOKEN_EXPIRED',
+      });
+    }
+    return res.status(401).json({ message: 'Token ไม่ถูกต้อง', code: 'TOKEN_INVALID' });
   }
 }
 

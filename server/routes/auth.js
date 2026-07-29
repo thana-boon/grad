@@ -1,25 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const { signToken } = require('../config/jwt');
 const db = require('../config/db');
 const schoolos = require('../config/schoolos');
 const logger = require('../config/logger');
 const { loginLimiter } = require('../middlewares/rateLimiter');
 const { ROLES } = require('../middlewares/authMiddleware');
 const { logActivity } = require('./activityLogs');
-
-// ─── ครูจาก SchoolOS → role ในระบบนี้ ────────────────────────────────────────
-// teacher-admin ที่ SchoolOS = admin ของ GradTrack ทันที ไม่ต้อง seed ไม่ต้องมอบสิทธิ์เอง
-// ครูทั่วไป = teacher (เข้าดูได้อย่างเดียว)
-const roleFromSchoolOS = (sosRole) =>
-  String(sosRole || '').toLowerCase() === 'teacher-admin' ? ROLES.ADMIN : ROLES.TEACHER;
-
-function issueToken(payload) {
-  return jwt.sign(payload, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
-}
+const { resolveAccess } = require('./staff');
 
 // POST /api/auth/login  — ล็อกอินฝั่งครู/ผู้ดูแล
 // ลำดับ: บัญชี local ก่อน → ถ้าไม่ผ่านค่อยถาม SchoolOS
@@ -40,7 +29,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     if (rows.length > 0) {
       const user = rows[0];
       if (await bcrypt.compare(password, user.password)) {
-        const token = issueToken({
+        const token = signToken({
           id: user.id,
           username: user.username,
           name: user.name,
@@ -74,8 +63,18 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(403).json({ message: 'บัญชีนี้ถูกปิดใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ' });
     }
 
-    const role = roleFromSchoolOS(sosUser.role);
-    const token = issueToken({
+    // ── 3) ต้องอยู่ในรายชื่อที่ผู้ดูแลเพิ่มไว้ (หน้า "จัดการผู้ใช้งาน") ─────────
+    // ยกเว้นตอนรายชื่อยังว่าง = ยังไม่เปิดใช้ allowlist → เข้าได้แบบเดิม
+    const access = await resolveAccess(sosUser);
+    if (!access) {
+      logger.warn('Login blocked: not in staff allowlist', { username: uname, sosRole: sosUser.role });
+      return res.status(403).json({
+        message: 'บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าใช้ระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มรายชื่อ',
+      });
+    }
+
+    const role = access.role;
+    const token = signToken({
       id: sosUser.id,
       username: sosUser.code,
       name: sosUser.name,
@@ -83,7 +82,14 @@ router.post('/login', loginLimiter, async (req, res) => {
       source: 'schoolos',
     });
 
-    logger.info('Login success (schoolos)', { username: uname, sosRole: sosUser.role, role, ip: req.ip });
+    logger.info('Login success (schoolos)', {
+      username: uname,
+      sosRole: sosUser.role,
+      role,
+      // false = ยังไม่มีใครในรายชื่อเลย ระบบยังเปิดให้ครูทุกคนเข้า
+      allowlisted: access.gated,
+      ip: req.ip,
+    });
     logActivity({ username: sosUser.code, name: sosUser.name, role, action: 'login', target: 'schoolos' });
 
     return res.json({

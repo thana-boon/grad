@@ -75,6 +75,7 @@ router.use('/uploads', express.static(UPLOAD_DIR));
 
 router.use('/api/auth', require('./routes/auth'));
 router.use('/api/users', require('./routes/users'));
+router.use('/api/staff', require('./routes/staff'));
 router.use('/api/academic-years', require('./routes/academicYears'));
 router.use('/api/students', require('./routes/students'));
 router.use('/api/universities', require('./routes/universities'));

@@ -3,6 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Icon from '../components/ui/Icon';
+import { LOGOUT_REASONS, getLogoutReason } from '../utils/session';
+
+// ข้อความตอนถูกเตะออก — ต้องบอกให้ชัดว่าไม่ได้ล็อกอินหลุดเพราะระบบพัง
+const TIMEOUT_NOTICES = {
+  [LOGOUT_REASONS.IDLE]: 'ไม่ได้ใช้งานนานเกิน 30 นาที ระบบออกจากระบบให้อัตโนมัติ กรุณาเข้าสู่ระบบใหม่',
+  [LOGOUT_REASONS.EXPIRED]: 'เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่',
+};
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -13,6 +20,11 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
+
+  // เหตุผลที่หลุด ถูก AuthContext เก็บไว้ตอนเคลียร์ session — อ่านตรงนี้เพื่อบอกผู้ใช้
+  // ว่าไม่ได้เด้งออกเพราะระบบพัง (ค่าถูกล้างตอนล็อกอินสำเร็จ/กดออกเอง ไม่ใช่ตอนอ่าน)
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+  const notice = noticeDismissed ? '' : TIMEOUT_NOTICES[getLogoutReason()] || '';
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -30,6 +42,7 @@ export default function LoginPage() {
     if (countdown > 0) return;
     setLoading(true);
     setError('');
+    setNoticeDismissed(true);
 
     const rawUsername = form.username.trim();
 
@@ -142,6 +155,13 @@ export default function LoginPage() {
           <p className="mt-1.5 text-sm text-base-content/55">
             ใช้บัญชีครู/ผู้ดูแล หรือรหัสนักเรียนของโรงเรียน
           </p>
+
+          {notice && (
+            <div role="status" className="alert alert-warning anim-scale-in mt-5 py-2.5">
+              <Icon name="clock" size={17} className="mt-px" />
+              <span className="text-sm">{notice}</span>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4" noValidate>
             <div>
