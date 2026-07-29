@@ -7,7 +7,7 @@ ENV TZ=Asia/Bangkok
 
 # ===== build client =====
 # base path ถูก bake ลงใน asset URL ทุกตัวตอน `vite build` → ต้องรู้ค่าตั้งแต่ตอน build
-# ไม่ใช่ตอน runtime  (compose ส่ง BASE_PATH=/gradtrack มาให้ ดู docker-compose.yml)
+# ไม่ใช่ตอน runtime  (compose ส่ง BASE_PATH=/grad มาให้ ดู docker-compose.yml)
 FROM base AS client
 ARG BASE_PATH=
 ENV BASE_PATH=$BASE_PATH

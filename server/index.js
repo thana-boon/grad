@@ -15,8 +15,8 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3003;
 
 // ─── BASE_PATH ────────────────────────────────────────────────────────────────
-// prod เสิร์ฟใต้ subpath (nginx portal ส่ง schoolos.sukhon.ac.th/gradtrack/... มาที่พอร์ตนี้
-// โดย "คง prefix ไว้") — ฝั่ง server จึงต้องรับ path ที่ยังมี /gradtrack นำหน้าอยู่
+// prod เสิร์ฟใต้ subpath (nginx portal ส่ง schoolos.sukhon.ac.th/grad/... มาที่พอร์ตนี้
+// โดย "คง prefix ไว้") — ฝั่ง server จึงต้องรับ path ที่ยังมี /grad นำหน้าอยู่
 // ค่าว่าง = เสิร์ฟที่ root (เหมาะกับ dev)
 //
 // ค่านี้ต้องตรงกับ BASE_PATH ที่ใช้ตอน build ฝั่ง client เป๊ะ ๆ ไม่งั้น asset 404
@@ -99,7 +99,7 @@ if (hasClient) {
   router.use(express.static(DIST_DIR, { index: false }));
 
   // SPA fallback: path ที่ไม่ใช่ /api และไม่ใช่ไฟล์จริง → คืน index.html
-  // ให้ react-router จัดการ route ต่อ (เช่นเปิด /gradtrack/admin/students ตรง ๆ หรือกด refresh)
+  // ให้ react-router จัดการ route ต่อ (เช่นเปิด /grad/admin/students ตรง ๆ หรือกด refresh)
   router.use((req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();
     if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return next();

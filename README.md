@@ -16,7 +16,7 @@
 | Database | **PostgreSQL** (เกาะ `postgres-core` บน network `school-net`) |
 | ข้อมูลนักเรียน/ครู | SchoolOS Public API (`/api/public/v1`) |
 | Auth | JWT ที่ GradTrack ออกเอง (ตรวจรหัสผ่านผ่าน SchoolOS `/auth/verify`) |
-| Deploy | Docker + Portainer, พอร์ต **3003** ใต้ path `/gradtrack` |
+| Deploy | Docker + Portainer, พอร์ต **3003** ใต้ path `/grad` |
 
 ---
 
@@ -49,15 +49,15 @@ cp .env.example .env      # แล้วเติมค่าจริง
 docker compose up -d --build
 ```
 
-เปิด <http://localhost:3003/gradtrack/>
+เปิด <http://localhost:3003/grad/>
 
 ตั้ง `BASE_PATH=` (ค่าว่าง) ใน `.env` แล้ว build ใหม่ ถ้าอยากให้เสิร์ฟที่ root แทน
 
 > ⚠️ บน PowerShell การสั่ง `$env:BASE_PATH = ""` เท่ากับ **ลบตัวแปรทิ้ง** ไม่ใช่ตั้งเป็นค่าว่าง
 > ถ้าจะตั้งค่าว่างจริง ๆ ต้องตั้งในไฟล์ `.env`
 >
-> ⚠️ อย่ารัน build ผ่าน Git Bash บน Windows — MSYS แปลง `/gradtrack` เป็น path แบบ Windows
-> (`C:/Program Files/Git/gradtrack`) ให้อัตโนมัติ ใช้ PowerShell
+> ⚠️ อย่ารัน build ผ่าน Git Bash บน Windows — MSYS แปลง `/grad` เป็น path แบบ Windows
+> (`C:/Program Files/Git/grad`) ให้อัตโนมัติ ใช้ PowerShell
 
 ### รันแบบ dev (ไม่ใช้ docker)
 
@@ -139,24 +139,11 @@ git add server/database/seeds && git commit -m "อัปเดตคลัง�
 
 ดูข้างในไฟล์ `.gz`: `gunzip -c catalog.json.gz | head -c 2000`
 
-### ดึงจาก GradTrack ตัวเก่า
-
-[`server/scripts/import-legacy-catalog.js`](server/scripts/import-legacy-catalog.js) ดูดคลังจากระบบเก่า (MySQL) ผ่าน HTTP API เข้ามาลง Postgres
-ใช้ครั้งเดียวตอนย้ายระบบ — `GET /api/universities` ของระบบเก่าเปิดสาธารณะ แต่คณะ/หลักสูตรต้องล็อกอินก่อน
-
-```bash
-docker exec -w /app/server \
-  -e LEGACY_BASE=http://192.168.200.9:5000 -e LEGACY_USER=xxx -e LEGACY_PASS=xxx \
-  gradtrack-app node scripts/import-legacy-catalog.js
-```
-
-เสร็จแล้วค่อย export เป็นไฟล์ seed ตามขั้นตอนข้างบน
-
 ---
 
 ## 🧭 กฎเรื่อง path / base path
 
-แอปเสิร์ฟใต้ subpath (`schoolos.sukhon.ac.th/gradtrack/`) โดย nginx **คง prefix ไว้** ไม่ตัดออก
+แอปเสิร์ฟใต้ subpath (`schoolos.sukhon.ac.th/grad/`) โดย nginx **คง prefix ไว้** ไม่ตัดออก
 
 - โค้ดใหม่ที่ประกอบ URL ของหน้าเว็บหรือไฟล์ใน `public/` **ต้องผ่าน `withBase()`**
   ([`client/src/utils/withBase.js`](client/src/utils/withBase.js))

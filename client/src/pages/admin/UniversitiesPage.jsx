@@ -190,7 +190,7 @@ export default function UniversitiesPage() {
   // ─── ดาวน์โหลดไฟล์ตัวอย่าง ────────────────────────────────────────────────
   // ต้องยิงผ่าน api (axios) ไม่ใช่ <a href download> เพราะ endpoint นี้ต้องใช้ JWT
   // ซึ่ง <a> ไม่ได้แนบ header ไปด้วย (ที่ผ่านมาจึงได้ 401 กลับมาเป็นไฟล์)
-  // ผลพลอยได้: baseURL ของ api พา prefix /gradtrack ไปให้เอง ไม่ต้อง hardcode path
+  // ผลพลอยได้: baseURL ของ api พา prefix /grad ไปให้เอง ไม่ต้อง hardcode path
   const downloadSample = async () => {
     try {
       const res = await api.get('/universities/sample-excel', { responseType: 'blob' });
