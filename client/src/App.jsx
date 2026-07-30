@@ -99,6 +99,14 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/backup"
+            element={
+              <ProtectedRoute allowedRole="admin">
+                <DashboardPage activePage="backup" />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin/activity-log"
             element={
               <ProtectedRoute allowedRole="staff">

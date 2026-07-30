@@ -30,5 +30,8 @@ server/logs/
 # Uploaded files (logo, csv, etc.)
 server/uploads/
 
+# ไฟล์สำรองข้อมูล — มีข้อมูลนักเรียนทั้งระบบอยู่ข้างใน ห้ามขึ้น git เด็ดขาด
+server/backups/
+
 # Editor
 .vscode/settings.json

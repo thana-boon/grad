@@ -41,10 +41,10 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 # ไม่รันเป็น root — user "node" มากับ base image อยู่แล้ว
-# uploads/ กับ logs/ ต้องเขียนได้ และต้องมีอยู่ใน image ก่อน mount volume
+# uploads/ logs/ backups/ ต้องเขียนได้ และต้องมีอยู่ใน image ก่อน mount volume
 # (named volume ที่ mount ครั้งแรกจะ copy ownership จากโฟลเดอร์ใน image)
-RUN mkdir -p /app/server/uploads /app/server/logs \
- && chown -R node:node /app/server/uploads /app/server/logs
+RUN mkdir -p /app/server/uploads /app/server/logs /app/server/backups \
+ && chown -R node:node /app/server/uploads /app/server/logs /app/server/backups
 USER node
 
 EXPOSE 3003

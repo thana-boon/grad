@@ -84,6 +84,7 @@ router.use('/api/programs', require('./routes/programs'));
 router.use('/api/student', require('./routes/studentAuth'));
 router.use('/api/report-settings', require('./routes/reportSettings'));
 router.use('/api/activity-logs', require('./routes/activityLogs'));
+router.use('/api/backups', require('./routes/backups'));
 
 router.get('/api/health', (req, res) => {
   res.json({ status: 'ok', port: PORT, basePath: BASE_PATH || '/' });

@@ -17,5 +17,7 @@
 .vscode
 uploads
 server/uploads
+backups
+server/backups
 README.md
 API-KEYS.md

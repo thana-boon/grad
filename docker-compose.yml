@@ -50,6 +50,13 @@ services:
       # ผิดค่านี้ = rate limit ตอน login นับรวมทั้งโรงเรียนเป็นถังเดียว
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
 
+      # ─── สำรอง/กู้คืนข้อมูล (หน้า "สำรอง/กู้คืนข้อมูล") ─────────────────
+      # เก็บไฟล์ที่ระบบสร้างเองไว้กี่ไฟล์ ที่เกินถูกลบตอนสำรองครั้งถัดไป (0 = ไม่ลบเลย)
+      # ไฟล์ที่แอดมินอัปโหลดเข้ามาเอง และไฟล์ที่ระบบสร้างให้ก่อนกู้คืน ไม่ถูกนับ/ไม่ถูกลบ
+      BACKUP_KEEP: ${BACKUP_KEEP:-20}
+      # ขนาดไฟล์สำรองสูงสุดที่ยอมให้อัปโหลดกลับเข้ามา (MB)
+      BACKUP_MAX_UPLOAD_MB: ${BACKUP_MAX_UPLOAD_MB:-1024}
+
       # ไม่มี env admin — สิทธิ์ admin มาจาก role "teacher-admin" ของ SchoolOS โดยตรง
     ports:
       - "3003:3003"
@@ -60,6 +67,9 @@ services:
       # ต้องอยู่ใน named volume ไม่งั้นหายทุกครั้งที่ pull & redeploy
       - gradtrack-uploads:/app/server/uploads
       - gradtrack-logs:/app/server/logs
+      # ไฟล์สำรองข้อมูลที่สร้าง/อัปโหลดผ่านหน้าเว็บ — ต้องอยู่ใน named volume
+      # ไม่งั้นไฟล์สำรองหายทุกครั้งที่ redeploy ซึ่งขัดกับเหตุผลที่มันมีอยู่
+      - gradtrack-backups:/app/server/backups
     healthcheck:
       # ยิงที่ root เสมอ — index.js เปิด /api/health ไว้ทั้งใต้ BASE_PATH และที่ root
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -97,3 +107,4 @@ networks:
 volumes:
   gradtrack-uploads:
   gradtrack-logs:
+  gradtrack-backups:

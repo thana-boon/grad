@@ -14,6 +14,7 @@ import AdmissionStatusPage from './admin/AdmissionStatusPage';
 import ReportPage from './admin/ReportPage';
 import AdmissionTableReportPage from './admin/AdmissionTableReportPage';
 import ActivityLogPage from './admin/ActivityLogPage';
+import BackupPage from './admin/BackupPage';
 
 // adminOnly = เมนูที่ครู read-only ไม่ควรเห็นเลย (API ฝั่งนั้นเป็น adminOnly อยู่แล้ว
 // กดไปก็ได้ 403 กลับมา — ซ่อนตั้งแต่แรกดีกว่าให้เจอหน้าพัง)
@@ -29,6 +30,7 @@ const ADMIN_MENU = [
   { key: 'report', label: 'รายงาน/Export', path: '/admin/report', icon: 'chart' },
   { key: 'report-table', label: 'รายงานตาราง', path: '/admin/report-table', icon: 'table' },
   { key: 'activity-log', label: 'Activity Log', path: '/admin/activity-log', icon: 'log' },
+  { key: 'backup', label: 'สำรอง/กู้คืนข้อมูล', path: '/admin/backup', icon: 'save', adminOnly: true },
 ];
 
 const TODAY = () =>
@@ -175,6 +177,7 @@ export default function DashboardPage({ activePage }) {
     if (activePage === 'report') return <ReportPage />;
     if (activePage === 'report-table') return <AdmissionTableReportPage />;
     if (activePage === 'activity-log') return <ActivityLogPage />;
+    if (activePage === 'backup') return <BackupPage />;
     return <AdminDashboard />;
   };
 
