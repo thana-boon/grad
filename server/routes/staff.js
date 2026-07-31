@@ -34,9 +34,13 @@ async function countAdmins() {
 /**
  * ตัดสินว่าครูคนนี้เข้าระบบได้ไหม และได้ role อะไร — เรียกจาก /api/auth/login
  *
+ * ผ่านได้ 3 ทาง (เรียงตามลำดับที่ตรวจ):
+ *   allowlist     — มีชื่อในตาราง staff_access · role ตามที่ผู้ดูแลตั้งไว้
+ *   schoolos-admin— เป็น teacher-admin ที่ SchoolOS · เข้าได้เสมอโดยไม่ต้องมีชื่อในรายชื่อ
+ *   open          — รายชื่อยังว่าง = ยังไม่เปิดใช้งาน จึงปล่อยครูทุกคนผ่านแบบเดิม
+ *
  * @param sosUser ที่ /auth/verify ตอบกลับ { id, code, name, role, active, status }
- * @returns { role, gated } · null = ไม่อยู่ในรายชื่อ (ห้ามเข้า)
- *          gated=false แปลว่ายังไม่เปิดใช้ allowlist (ตารางว่าง) จึงปล่อยผ่านแบบเดิม
+ * @returns { role, via } · null = ไม่อยู่ในรายชื่อและไม่ใช่ admin (ห้ามเข้า)
  */
 async function resolveAccess(sosUser) {
   const code = normCode(sosUser?.code);
@@ -54,12 +58,23 @@ async function resolveAccess(sosUser) {
     `SELECT role FROM staff_access WHERE ${wheres.join(' OR ')} LIMIT 1`,
     params
   );
-  if (rows.length > 0) return { role: normRole(rows[0].role), gated: true };
+  // มีชื่อในรายชื่อ → ใช้ role ที่ผู้ดูแลตั้งไว้ (ทับ role ที่ SchoolOS ให้มา
+  // เพราะเป็นการตั้งใจกำหนดสิทธิ์เฉพาะใน GradTrack)
+  if (rows.length > 0) return { role: normRole(rows[0].role), via: 'allowlist' };
+
+  // teacher-admin ของ SchoolOS เข้าได้เสมอ ไม่ต้องมีชื่อในรายชื่อ
+  //
+  // SchoolOS เป็นเจ้าของสิทธิ์ admin อยู่แล้ว (ระบบนี้ไม่มีการตั้ง admin เองเลย)
+  // ถ้าปล่อยให้รายชื่อกันผู้ดูแลได้ด้วย จะเจอกับดักที่เกิดมาแล้ว: เพิ่มครูคนแรก
+  // เข้ารายชื่อโดยลืมใส่ตัวเอง → ประตูปิดทันที แล้วล็อกตัวเองออกจากหน้าที่ใช้แก้รายชื่อนั้นเอง
+  if (roleFromSchoolOS(sosUser?.role) === ROLES.ADMIN) {
+    return { role: ROLES.ADMIN, via: 'schoolos-admin' };
+  }
 
   // ยังไม่มีใครในรายชื่อ = ยังไม่ได้ตั้งค่า → ทำงานแบบเดิมไปก่อน
-  // (ถ้าปิดตายตั้งแต่ตารางว่าง จะไม่มีใครล็อกอินเข้ามาเพิ่มรายชื่อได้เลย)
+  // (ถ้าปิดตายตั้งแต่ตารางว่าง ครูทั้งโรงเรียนจะเข้าไม่ได้ทันทีที่ deploy)
   if ((await countMembers()) === 0) {
-    return { role: roleFromSchoolOS(sosUser?.role), gated: false };
+    return { role: roleFromSchoolOS(sosUser?.role), via: 'open' };
   }
 
   return null;

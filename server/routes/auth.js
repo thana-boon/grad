@@ -116,8 +116,8 @@ router.post('/login', loginLimiter, async (req, res) => {
       username: uname,
       sosRole: sosUser.role,
       role,
-      // false = ยังไม่มีใครในรายชื่อเลย ระบบยังเปิดให้ครูทุกคนเข้า
-      allowlisted: access.gated,
+      // ผ่านด่านมาทางไหน: allowlist | schoolos-admin | open (ดู resolveAccess)
+      access: access.via,
       ip: req.ip,
     });
     logActivity({ username: sosUser.code, name: sosUser.name, role, action: 'login', target: 'schoolos' });
