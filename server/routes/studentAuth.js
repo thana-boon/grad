@@ -224,6 +224,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       role: 'student',
     });
 
+    // รูปจาก SchoolOS ใช้เป็นรูปสำรองของ avatar เมื่อยังไม่ได้อัปโหลดรูปในระบบนี้
+    // (photo_url ที่นักเรียนอัปเองยังเป็นตัวหลักเสมอ — ใช้ในหน้า "ของฉัน"/รายงาน)
+    const avatar = await schoolos.fetchPhotoDataUrl(student.photo_path);
+
     logger.info('Student login success', { student_code: student.student_code, via, ip: req.ip });
     logActivity({
       username: paddedCode,
@@ -246,6 +250,7 @@ router.post('/login', loginLimiter, async (req, res) => {
         role: 'student',
         quote: profile?.quote || '',
         photo_url: profile?.photo_url || null,
+        avatar,
       },
     });
   } catch (err) {

@@ -10,6 +10,35 @@ const { ROLES } = require('../middlewares/authMiddleware');
 const { logActivity } = require('./activityLogs');
 const { resolveAccess } = require('./staff');
 
+/**
+ * ข้อมูลไว้ "แสดงผล" ของครูจาก SchoolOS — ชื่อจริง (ไว้ทำอักษรย่อ) + รูปโปรไฟล์
+ *
+ * /auth/verify ให้มาแค่ชื่อเต็มซึ่งมีคำนำหน้าติดมาด้วย ("นายชรินทร์ รีนับถือ")
+ * ถ้าเอาตัวอักษรแรกไปทำ avatar ตรง ๆ ครูทั้งโรงเรียนจะได้ "น" ของ "นาย" เหมือนกันหมด
+ * จึงต้องดึงระเบียนครูที่แยกฟิลด์ชื่อไว้แล้วมาอีกที
+ *
+ * ล้มเหลวเมื่อไหร่ก็แค่ไม่มีรูป/ไม่มีชื่อจริง — ห้ามทำให้ล็อกอินพัง
+ */
+async function loadStaffProfile(sosUser) {
+  const code = String(sosUser?.code || '').trim();
+  if (!code) return {};
+
+  try {
+    // q ค้นได้ทั้งชื่อและรหัส จึงต้องกรองซ้ำให้ตรงรหัสเป๊ะ ๆ เอง
+    const { data } = await schoolos.listTeachers({ q: code, limit: 50 });
+    const teacher = (data || []).find((t) => String(t.teacher_code).trim() === code);
+    if (!teacher) return {};
+
+    return {
+      first_name: teacher.first_name || '',
+      avatar: await schoolos.fetchPhotoDataUrl(teacher.photo_path),
+    };
+  } catch (err) {
+    logger.warn('Load SchoolOS staff profile failed', { code, error: err.message });
+    return {};
+  }
+}
+
 // POST /api/auth/login  — ล็อกอินฝั่งครู/ผู้ดูแล
 // ลำดับ: บัญชี local ก่อน → ถ้าไม่ผ่านค่อยถาม SchoolOS
 // (บัญชี local มีไว้เป็นทางเข้าสำรองตอน SchoolOS ล่ม จึงต้องมาก่อน)
@@ -74,6 +103,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     const role = access.role;
+    const profile = await loadStaffProfile(sosUser);
     const token = signToken({
       id: sosUser.id,
       username: sosUser.code,
@@ -98,6 +128,10 @@ router.post('/login', loginLimiter, async (req, res) => {
         id: sosUser.id,
         username: sosUser.code,
         name: sosUser.name,
+        // ไว้ทำอักษรย่อบน avatar เมื่อไม่มีรูป — ตัดปัญหาคำนำหน้าปนมากับ name
+        first_name: profile.first_name || '',
+        // data URL หรือ null (ไม่มีรูปใน SchoolOS / ดึงไม่สำเร็จ)
+        avatar: profile.avatar || null,
         role,
         source: 'schoolos',
         // ให้ฝั่ง client ซ่อนปุ่มแก้ไขได้เลยโดยไม่ต้องเดาจาก role string

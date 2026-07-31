@@ -116,6 +116,8 @@ function mapStudent(s) {
     class_level: s.gradeLevel ?? '',
     class_room: num(s.classroom),
     number_in_room: num(s.classNumber),
+    // path ของรูปบน SchoolOS (ยังโหลดตรงจาก browser ไม่ได้ — ต้องมี key) ดู fetchPhotoDataUrl
+    photo_path: s.photoUrl ?? null,
     // มีค่าก็ต่อเมื่อ key มี scope students:pii เท่านั้น — ปกติเป็น undefined
     citizen_id: s.citizenId,
   };
@@ -135,6 +137,7 @@ function mapTeacher(t) {
     grade_taught: t.gradeTaught ?? null,
     role: t.role ?? 'teacher',
     employment_status: t.employmentStatus ?? null,
+    photo_path: t.photoUrl ?? null,
   };
 }
 
@@ -351,6 +354,46 @@ async function verify(role, username, password) {
   return data.user; // { id, code, name, role, active, status }
 }
 
+// ─── รูปโปรไฟล์ ──────────────────────────────────────────────────────────────
+/**
+ * โหลดรูปจาก SchoolOS แล้วแปลงเป็น data URL
+ *
+ * endpoint รูปต้องแนบ X-API-Key เหมือน endpoint อื่น → <img src> ของ browser
+ * โหลดตรงไม่ได้ (key ห้ามหลุดออกไปฝั่ง client) จึงดึงฝั่ง server แล้วฝัง base64
+ * ไปกับ user object ตอนล็อกอินครั้งเดียว — ไม่ต้องมี route proxy และไม่ต้องหาวิธี
+ * แนบ token ไปกับแท็ก <img>
+ *
+ * ไม่เคยโยน error: ไม่มีรูปก็แค่ไปแสดงอักษรย่อแทน ห้ามทำให้ล็อกอินล้ม
+ */
+const PHOTO_MAX_BYTES = 512 * 1024; // กันไฟล์ใหญ่ผิดปกติมาบวม localStorage ฝั่ง client
+
+async function fetchPhotoDataUrl(photoPath) {
+  // รับเฉพาะ path ใต้ /api/public/v1 ที่ SchoolOS ส่งมาเอง — ค่าที่ชี้ไปโฮสต์อื่น
+  // ต้องไม่ถูกยิงต่อพร้อม key ของเรา
+  const p = String(photoPath || '');
+  if (!p.startsWith(`${V1}/`)) return null;
+
+  try {
+    const res = await sos(p.slice(V1.length));
+    if (!res.ok) {
+      // 404 = คนนี้ไม่มีรูป เป็นเรื่องปกติ ไม่ต้อง log
+      if (res.status !== 404) logger.warn('SchoolOS photo failed', { status: res.status });
+      return null;
+    }
+
+    const type = res.headers.get('content-type') || '';
+    if (!type.startsWith('image/')) return null;
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0 || buf.length > PHOTO_MAX_BYTES) return null;
+
+    return `data:${type.split(';')[0]};base64,${buf.toString('base64')}`;
+  } catch (err) {
+    logger.warn('SchoolOS photo unreachable', { error: err.message });
+    return null;
+  }
+}
+
 // ─── /me — ใช้ตรวจ key ตอนสตาร์ท ─────────────────────────────────────────────
 async function me() {
   return getJson('/me', 'me');
@@ -364,6 +407,7 @@ module.exports = {
   getAcademicYearById,
   listTeachers,
   listAllTeachers,
+  fetchPhotoDataUrl,
   verify,
   me,
   SosKeyError,

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, NavLink, useLocation } from 'react-router-dom';
 import Icon from '../components/ui/Icon';
+import Avatar from '../components/ui/Avatar';
 import AdminDashboard from '../components/dashboard/AdminDashboard';
 import StudentDashboard from '../components/dashboard/StudentDashboard';
 import AccountsPage from './admin/AccountsPage';
@@ -40,11 +41,6 @@ const TODAY = () =>
     month: 'long',
     year: 'numeric',
   });
-
-function initials(name = '') {
-  const t = name.trim();
-  return t ? t[0].toUpperCase() : '?';
-}
 
 /* เนื้อใน sidebar — ใช้ซ้ำทั้งฝั่ง desktop และ drawer มือถือ
    (ประกาศไว้นอก component หลัก ไม่งั้น React remount ใหม่ทุกครั้งที่ parent render) */
@@ -100,9 +96,7 @@ function SidebarBody({ mini = false, menu, activePage, user, roleLabel, onLogout
             mini ? 'justify-center' : ''
           }`}
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#F5C518] text-xs font-bold text-[#241b04]">
-            {initials(user?.name || user?.username)}
-          </span>
+          <Avatar user={user} className="size-8 bg-[#F5C518] text-xs font-bold text-[#241b04]" />
           {!mini && (
             <div className="min-w-0 leading-tight">
               <p className="truncate text-xs font-medium text-white">
@@ -266,9 +260,10 @@ export default function DashboardPage({ activePage }) {
               <span className="hidden text-sm font-medium sm:block">
                 {user?.name || user?.username}
               </span>
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-sm font-semibold text-primary-content">
-                {initials(user?.name || user?.username)}
-              </span>
+              <Avatar
+                user={user}
+                className="size-9 bg-primary text-sm font-semibold text-primary-content"
+              />
             </div>
           </header>
 
