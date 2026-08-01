@@ -121,7 +121,8 @@ CREATE INDEX IF NOT EXISTS idx_programs_university ON programs (university_id);
 CREATE INDEX IF NOT EXISTS idx_programs_lookup     ON programs (university_id, program_name_th);
 
 -- ─── student_profiles — ข้อมูลที่ GradTrack เก็บเอง (รูป/คำคม) ────────────────
--- ชื่อ/ชั้น/ห้อง ไม่เก็บที่นี่ — อ่านสดจาก SchoolOS เสมอ
+-- ชื่อ/ชั้น/ห้อง ไม่เก็บที่นี่ เพราะตารางนี้เป็น 1 แถวต่อคน (ข้ามปี)
+-- ส่วนชื่อ/ชั้น/ห้องเปลี่ยนทุกปี → เก็บแยกรายปีที่ student_snapshots (003_*.sql)
 CREATE TABLE IF NOT EXISTS student_profiles (
   id           SERIAL PRIMARY KEY,
   student_code VARCHAR(20) NOT NULL UNIQUE,

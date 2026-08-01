@@ -152,6 +152,152 @@ function mapYear(y, isCurrent = false) {
   };
 }
 
+// ─── snapshot — สำเนาชื่อ/ชั้น/ห้อง ที่ GradTrack เก็บเอง ─────────────────────
+// เหตุผลเต็ม ๆ อยู่หัวไฟล์ database/postgres/003_student_snapshots.sql
+// สรุป: ข้อมูลรุ่นที่จบไปแล้วหายจาก SchoolOS ได้ (ขึ้นปีใหม่ / ถูกย้ายเข้ากรุ)
+// แต่เป็นข้อมูลหลักของ GradTrack จึงต้องมีสำเนาของตัวเอง
+
+/** เขียนสำเนารายชื่อของปีหนึ่งลงตาราง (upsert ทับของเดิมเสมอ) */
+async function rememberStudents(rows, yearId, yearBe) {
+  const year = Number(yearId);
+  if (!Number.isFinite(year) || year <= 0) return;
+
+  // กันรหัสซ้ำในชุดเดียวกัน — ON CONFLICT DO UPDATE แตะแถวเดิมสองครั้งใน INSERT
+  // เดียวไม่ได้ Postgres จะโยน error ทิ้งทั้งชุด
+  const byCode = new Map();
+  for (const s of rows || []) {
+    if (s?.student_code) byCode.set(String(s.student_code), s);
+  }
+  if (byCode.size === 0) return;
+
+  const text = (v) => (v === null || v === undefined || v === '' ? null : String(v));
+
+  const groups = [];
+  const params = [];
+  for (const [code, s] of byCode) {
+    groups.push('(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)');
+    params.push(
+      code,
+      year,
+      Number.isFinite(Number(s.id)) ? Number(s.id) : null,
+      text(yearBe),
+      s.title_prefix ?? '',
+      s.first_name ?? '',
+      s.last_name ?? '',
+      text(s.class_level),
+      text(s.class_room),
+      text(s.number_in_room),
+      text(s.status)
+    );
+  }
+
+  await db.query(
+    `INSERT INTO student_snapshots
+       (student_code, year_id, schoolos_id, year_be, title_prefix, first_name, last_name,
+        class_level, class_room, number_in_room, status, seen_at)
+     VALUES ${groups.join(', ')}
+     ON CONFLICT (student_code, year_id) DO UPDATE SET
+       schoolos_id    = COALESCE(EXCLUDED.schoolos_id, student_snapshots.schoolos_id),
+       -- ค่าที่เคยรู้แล้วดีกว่า null ที่เพิ่งเขียนทับ (ดูเงื่อนไข year_be ใน listStudents)
+       year_be        = COALESCE(EXCLUDED.year_be, student_snapshots.year_be),
+       title_prefix   = EXCLUDED.title_prefix,
+       first_name     = EXCLUDED.first_name,
+       last_name      = EXCLUDED.last_name,
+       class_level    = EXCLUDED.class_level,
+       class_room     = EXCLUDED.class_room,
+       number_in_room = EXCLUDED.number_in_room,
+       status         = EXCLUDED.status,
+       seen_at        = CURRENT_TIMESTAMP`,
+    params
+  );
+}
+
+/**
+ * อ่านสำเนาของหลายรหัสพร้อมกัน — คืน Map ที่ค้นได้ทั้งรหัสแบบ pad ("02809")
+ * และแบบตัดศูนย์ ("2809") เพราะข้อมูลเก่าใน DB เก็บไว้คนละแบบกับที่ API ส่งมา
+ *
+ * เอาแถวของ "ปีล่าสุดที่เคยเห็น" ของแต่ละคน = ปีที่เรียนจบ สำหรับคนที่จบไปแล้ว
+ */
+async function lookupSnapshots(codes) {
+  const keys = [
+    ...new Set(
+      (codes || [])
+        .flatMap((c) => {
+          const raw = String(c ?? '').trim();
+          if (!raw) return [];
+          const n = parseInt(raw, 10);
+          return Number.isNaN(n) ? [raw] : [raw, String(n)];
+        })
+        .filter(Boolean)
+    ),
+  ];
+  if (keys.length === 0) return new Map();
+
+  const [rows] = await db
+    .query(
+      `SELECT DISTINCT ON (student_code)
+              student_code, schoolos_id, year_id, year_be,
+              title_prefix, first_name, last_name,
+              class_level, class_room, number_in_room, status
+         FROM student_snapshots
+        WHERE student_code = ANY(?)
+        ORDER BY student_code, year_id DESC`,
+      [keys]
+    )
+    .catch((e) => {
+      logger.warn('อ่าน snapshot นักเรียนไม่สำเร็จ', { error: e.message });
+      return [[]];
+    });
+
+  const map = new Map();
+  for (const r of rows) {
+    const info = {
+      id: r.schoolos_id ?? null,
+      student_code: r.student_code,
+      title_prefix: r.title_prefix ?? '',
+      first_name: r.first_name ?? '',
+      last_name: r.last_name ?? '',
+      class_level: r.class_level ?? '',
+      class_room: num(r.class_room),
+      number_in_room: num(r.number_in_room),
+      status: r.status ?? null,
+      year_id: r.year_id,
+      year_be: r.year_be ?? null,
+      from_snapshot: true,
+    };
+    map.set(String(r.student_code), info);
+    const n = parseInt(r.student_code, 10);
+    if (!Number.isNaN(n)) map.set(String(n), info);
+  }
+  return map;
+}
+
+// ─── ปีการศึกษาที่เคยเห็น (แคชในตาราง academic_years) ────────────────────────
+/** id ปีการศึกษาเรียงใหม่ → เก่า (id ฝั่ง SchoolOS เพิ่มขึ้นตามปี) */
+async function cachedYearIds() {
+  const [rows] = await db
+    .query('SELECT id, is_current FROM academic_years ORDER BY id DESC')
+    .catch(() => [[]]);
+  return rows
+    .map((r) => ({ id: Number(r.id), is_current: !!r.is_current }))
+    .filter((r) => Number.isFinite(r.id));
+}
+
+/**
+ * ปีนี้ยังนับเป็น "รุ่นล่าสุด" อยู่ไหม — ใช้ตัดสินว่าเด็กที่จบแล้วยังล็อกอินได้หรือยัง
+ *
+ * นับปี active กับปีที่เพิ่งผ่านไป รวมสองปี เพราะช่วงที่ต้องเปิดให้เข้าคือ
+ * มี.ค. (โรงเรียนทำจบ) ถึงราว มิ.ย. (ผล TCAS รอบ 4) ซึ่งคร่อมจุดที่ SchoolOS
+ * สลับปี active พอดี — พอรุ่นถัดไปจบ ปีเก่าจะร่วงเป็นอันดับ 3 แล้วปิดเองอัตโนมัติ
+ * โดยไม่ต้องมีใครไปตั้งวันหมดอายุทุกปี
+ */
+async function isRecentYear(yearId) {
+  const year = Number(yearId);
+  if (!Number.isFinite(year)) return false;
+  const ids = (await cachedYearIds()).map((r) => r.id);
+  return ids.slice(0, 2).includes(year);
+}
+
 // ─── students ────────────────────────────────────────────────────────────────
 // รับ params แบบเดิมของ GradTrack (year_id, class_level, limit) แล้วแปลงเป็นชื่อของ API ใหม่
 async function listStudents(params = {}) {
@@ -167,13 +313,35 @@ async function listStudents(params = {}) {
   sp.set('pageSize', String(Math.min(Number(params.limit) || 50, MAX_PAGE_SIZE)));
 
   const d = await getJson(`/students?${sp}`, 'listStudents');
+  const data = (d.data || []).map(mapStudent);
+  const academicYear = d.academicYear ? mapYear(d.academicYear, true) : null;
+
+  // เก็บสำเนาไว้ทุกครั้งที่รู้แน่ว่าข้อมูลชุดนี้เป็นของปีไหน — ไม่มีปุ่มให้ครูกดเอง
+  // เพราะปุ่มที่ต้องกดก่อนขึ้นปีใหม่คือปุ่มที่จะถูกลืม แค่มีคนเปิดดูรายชื่อรุ่นนั้น
+  // สักครั้งก่อนกลางเดือน พ.ค. ก็ได้สำเนาครบแล้ว
+  //
+  // ปีที่เราส่งไปเองมาก่อน academicYear ที่ API ตอบกลับ: ถ้าวันหนึ่ง API เปลี่ยนไป
+  // ตอบปี active แทนปีที่ถาม (แบบเดียวกับ /students/{id} ในข้อ 4.3) สำเนาของรุ่นเก่า
+  // จะถูกเขียนทับลงปีปัจจุบัน ซึ่งเป็นความเสียหายที่มองไม่เห็นจนกว่าจะสาย
+  //
+  // ห้าม await: DB ช้าหรือล่มไม่ควรทำให้การอ่านรายชื่อพังหรือหน่วง
+  const snapshotYearId = Number(params.year_id) || academicYear?.id || null;
+  if (snapshotYearId) {
+    // year_be เก็บก็ต่อเมื่อรู้ว่าเป็น พ.ศ. ของปีเดียวกันจริง ๆ — ปีผิดคู่กับ id
+    // แย่กว่าไม่มีปี เพราะรายงานจะแสดงเลขปีที่ดูน่าเชื่อถือแต่ผิด
+    const yearBe = academicYear?.id === snapshotYearId ? academicYear.year_be : null;
+    rememberStudents(data, snapshotYearId, yearBe).catch((e) =>
+      logger.warn('เก็บ snapshot นักเรียนไม่สำเร็จ', { error: e.message })
+    );
+  }
+
   return {
-    data: (d.data || []).map(mapStudent),
+    data,
     meta: {
       total: d.total ?? 0,
       page: d.page ?? 1,
       limit: d.pageSize ?? 0,
-      academic_year: d.academicYear ? mapYear(d.academicYear, true) : null,
+      academic_year: academicYear,
     },
   };
 }
@@ -201,30 +369,70 @@ async function listAllStudents(params = {}) {
 }
 
 /**
- * หานักเรียนจากรหัส
+ * หานักเรียนจากรหัส พร้อมบอกว่าเจอในปีการศึกษาไหน
  *
  * API ใหม่ไม่มี endpoint /students/:code แบบเดิม — ต้องค้นผ่าน q แล้วจับคู่เอง
  * (q ค้นได้ทั้งชื่อ/นามสกุล/รหัส จึงต้องกรองซ้ำฝั่งเราเพื่อไม่ให้ได้คนที่ชื่อพ้องรหัส)
  *
  * รหัสจาก SchoolOS pad ศูนย์ 5 หลัก ("02809") แต่ข้อมูลเก่าใน DB เก็บแบบ "2809"
  * จึงลองเทียบทั้งสองแบบ
+ *
+ * ⚠️ `?q=` ค้นได้เฉพาะในปีเดียว (API.md §5.3) ถ้าไม่ส่ง yearId จะได้ปี active
+ * เท่านั้น → เด็กที่จบไปแล้วหาไม่เจอตั้งแต่ SchoolOS สลับปี ราวกลางเดือน พ.ค.
+ * ซึ่งดันตรงกับช่วงที่ผล TCAS รอบ 3/4 ทยอยออก จึงต้องไล่ปีย้อนหลังให้ด้วย
+ *
+ * คืน { student, yearId } — yearId คือปีที่เจอ ใช้ตัดสินสิทธิ์ต่อได้ (isRecentYear)
+ *
+ * ⚠️ ค่าใช้จ่ายคือ (จำนวนปี + 1) × (รูปแบบรหัส ~2) requests เมื่อหาไม่เจอ
+ * ไหวสบายเมื่อเรียกทีละคน (ล็อกอิน/หน้าโปรไฟล์) แต่ห้ามเอาไปวนทั้งรุ่น — จะชน
+ * เพดาน 600 req/ชม. (API.md §7) แล้วทั้งระบบใช้ไม่ได้ยกชั่วโมง
+ * งานที่ต้อง resolve หลายคนพร้อมกันให้ใช้ lookupSnapshots() แล้วค่อยลด yearDepth
  */
-async function getStudentByCode(rawCode) {
+const YEAR_FALLBACK_DEPTH = 3; // ย้อนหลังกี่ปี — กันไล่ยิงยาวจนชน rate limit
+
+async function findStudentWithYear(rawCode, { yearDepth = YEAR_FALLBACK_DEPTH } = {}) {
   const code = String(rawCode || '').trim();
-  if (!code) return null;
+  if (!code) return { student: null, yearId: null };
 
   const candidates = [...new Set([code, code.padStart(5, '0'), String(parseInt(code, 10))]
     .filter((c) => c && c !== 'NaN'))];
 
-  for (const candidate of candidates) {
-    const { data } = await listStudents({ q: candidate, limit: MAX_PAGE_SIZE });
-    const hit = (data || []).find((s) =>
-      candidates.includes(String(s.student_code)) ||
-      String(parseInt(s.student_code, 10)) === String(parseInt(candidate, 10))
-    );
-    if (hit) return hit;
+  // yearId = null → ปล่อยให้ API ใช้ปี active ตาม default
+  const searchYear = async (yearId) => {
+    for (const candidate of candidates) {
+      const { data, meta } = await listStudents({
+        q: candidate,
+        limit: MAX_PAGE_SIZE,
+        ...(yearId ? { year_id: yearId } : {}),
+      });
+      const hit = (data || []).find((s) =>
+        candidates.includes(String(s.student_code)) ||
+        String(parseInt(s.student_code, 10)) === String(parseInt(candidate, 10))
+      );
+      if (hit) return { student: hit, yearId: meta?.academic_year?.id ?? yearId ?? null };
+    }
+    return null;
+  };
+
+  // 1) ปี active — เด็กที่ยังเรียนอยู่จบตรงนี้ใน request เดียว
+  const inActive = await searchYear(null);
+  if (inActive) return inActive;
+
+  // 2) ไล่ปีย้อนหลังจากที่แคชไว้ — เส้นทางของเด็กที่จบ/ลาออกไปแล้ว
+  if (yearDepth > 0) {
+    const years = await cachedYearIds();
+    for (const y of years.filter((v) => !v.is_current).slice(0, yearDepth)) {
+      const hit = await searchYear(y.id);
+      if (hit) return hit;
+    }
   }
-  return null;
+
+  return { student: null, yearId: null };
+}
+
+async function getStudentByCode(rawCode, opts) {
+  const { student } = await findStudentWithYear(rawCode, opts);
+  return student;
 }
 
 // ─── academic years ──────────────────────────────────────────────────────────
@@ -403,6 +611,10 @@ module.exports = {
   listStudents,
   listAllStudents,
   getStudentByCode,
+  findStudentWithYear,
+  rememberStudents,
+  lookupSnapshots,
+  isRecentYear,
   getAcademicYears,
   getAcademicYearById,
   listTeachers,

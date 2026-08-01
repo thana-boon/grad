@@ -182,13 +182,34 @@ router.post('/login', loginLimiter, async (req, res) => {
     // ── 1) รหัสผ่าน SchoolOS ──────────────────────────────────────────────────
     const sosUser = await schoolos.verify('student', paddedCode, password);
     if (sosUser) {
-      if (!sosUser.active) {
-        // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออกแล้วด้วย — ต้องกันเอง
+      // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออก/พักการเรียนด้วย (API.md §4.9)
+      // ระบบปลายทางต้องตัดสินเองว่าใครเข้าได้ — ที่นี่ใช้เกณฑ์ "รุ่นที่เพิ่งจบ"
+      //
+      // เปิดเฉพาะ "จบการศึกษา" เท่านั้น — ลาออก/พ้นสภาพระหว่างทางตัดทิ้งตั้งแต่ตรงนี้
+      // ก่อนไปค้นรายชื่อ จะได้ไม่เปลืองโควตา API ให้คนที่ยังไงก็เข้าไม่ได้
+      const graduated = String(sosUser.status || '') === 'graduated';
+      if (!sosUser.active && !graduated) {
         logger.warn('Student login blocked: inactive', { username: paddedCode, status: sosUser.status });
         return res.status(403).json({ message: 'บัญชีนี้ไม่ได้อยู่ในสถานะกำลังศึกษา' });
       }
-      student = await schoolos.getStudentByCode(sosUser.code || paddedCode);
-      via = 'schoolos';
+
+      const found = await schoolos.findStudentWithYear(sosUser.code || paddedCode);
+
+      // โรงเรียนทำจบราวเดือน มี.ค. แต่ผล TCAS รอบ 3/4 ออก พ.ค.–มิ.ย.
+      // ถ้าปิดตอนจบทันที เด็กจะกรอกผลรอบท้าย ๆ ไม่ได้เลย จึงเปิดต่อให้อีกรุ่นหนึ่ง
+      // แล้วปิดเองเมื่อรุ่นถัดไปจบ (isRecentYear) — ไม่ต้องตั้งวันหมดอายุทุกปี
+      if (!sosUser.active && !(found.yearId && await schoolos.isRecentYear(found.yearId))) {
+        logger.warn('Student login blocked: old cohort', {
+          username: paddedCode, status: sosUser.status, year_id: found.yearId,
+        });
+        return res.status(403).json({
+          message: 'รุ่นของคุณปิดการเข้าใช้งานแล้ว หากต้องการแก้ไขข้อมูล กรุณาติดต่อครูแนะแนว',
+        });
+      }
+
+      student = found.student;
+      // แยก via ไว้ให้ audit log อ่านออกว่าเป็นการเข้าใช้ของศิษย์เก่า ไม่ใช่เด็กปัจจุบัน
+      via = sosUser.active ? 'schoolos' : 'schoolos-alumni';
     }
 
     // ── 2) legacy: Skdw + เลขบัตรประชาชน ─────────────────────────────────────
@@ -587,16 +608,11 @@ router.get('/admin/students-by-university', verifyToken, staffRead, async (req, 
       params
     );
 
-    // ── resolve ชื่อนักเรียนจาก Student API ──
-    // 1) ปีที่ระบุ → fallback ปี active ของ GradTrack → ดึงทั้งปีมาทำ map
-    let activeYearId = Number(year_id) || null;
-    if (!activeYearId) {
-      const [[setting]] = await db.query(
-        "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
-      ).catch(() => [[null]]);
-      activeYearId = Number(setting?.value || 0) || null;
-    }
-
+    // ── resolve ชื่อนักเรียน ──
+    // หน้านี้เป็นรายงานข้ามรุ่น: รหัสส่วนใหญ่เป็นของเด็กที่จบไปแล้ว ซึ่ง SchoolOS
+    // จะหาไม่เจอเมื่อขึ้นปีใหม่ (API.md §5.3) และหายถาวรถ้าถูกย้ายเข้ากรุ (§5.4)
+    // จึงอ่านจาก snapshot ของเราเองก่อนเสมอ แล้วค่อยพึ่ง API เท่าที่ยังขาด —
+    // ช่วยเลี่ยงการยิงรายคนทั้งรุ่นซึ่งชนเพดาน 600 req/ชม. ได้ง่ายมาก
     const nameMap = new Map();
     const setInfo = (s) => {
       const info = {
@@ -611,34 +627,60 @@ router.get('/admin/students-by-university', verifyToken, staffRead, async (req, 
       nameMap.set(normCode(s.student_code), info);
     };
 
-    if (activeYearId) {
-      try {
-        const { data } = await schoolos.listAllStudents({ year_id: activeYearId });
-        for (const s of (data || [])) setInfo(s);
-      } catch { /* API ล่ม → แสดงเฉพาะรหัส */ }
+    // 1) snapshot ในฐานข้อมูลเรา
+    const snapshots = await schoolos.lookupSnapshots(rows.map((r) => r.student_code));
+    for (const info of new Set(snapshots.values())) setInfo(info);
+
+    const stillMissing = () =>
+      [...new Set(
+        rows
+          .filter((r) => !nameMap.has(String(r.student_code)) && !nameMap.has(normCode(r.student_code)))
+          .map((r) => r.student_code)
+      )];
+
+    // 2) ยังขาด → ดึงทั้งปีจาก API (ปีที่ระบุ → ปี active ของ GradTrack)
+    //    เผื่อกรณีรุ่นปัจจุบันที่ยังไม่เคยมีใครเปิดดูรายชื่อ จึงยังไม่มี snapshot
+    //    การดึงรอบนี้จะเขียน snapshot ให้เองด้วย รอบหน้าจึงไม่ต้องยิงซ้ำ
+    if (stillMissing().length) {
+      let activeYearId = Number(year_id) || null;
+      if (!activeYearId) {
+        const [[setting]] = await db.query(
+          "SELECT `value` FROM `settings` WHERE `key` = 'active_year_id'"
+        ).catch(() => [[null]]);
+        activeYearId = Number(setting?.value || 0) || null;
+      }
+      if (activeYearId) {
+        try {
+          const { data } = await schoolos.listAllStudents({ year_id: activeYearId });
+          for (const s of (data || [])) setInfo(s);
+        } catch { /* API ล่ม → แสดงเฉพาะรหัส */ }
+      }
+    }
+
+    // 3) ที่เหลือจริง ๆ → ดึงรายคน ปกติเหลือไม่กี่รหัสเพราะสองขั้นบนกวาดไปเกือบหมด
+    //
+    //    ตรงนี้คูณกันได้เร็วมาก: รหัส × รูปแบบรหัส × ปีที่ไล่ย้อนหลัง จึงจำกัดทั้ง
+    //    จำนวนรหัสต่อครั้งและความลึกของการไล่ปี ให้เพดานอยู่ราว 50 requests
+    //    ไม่ใช่ 400 — ชน 600/ชม. ครั้งเดียวคือทั้งระบบใช้ไม่ได้ยกชั่วโมง
+    //    (รหัสที่ยังไม่ขึ้นชื่อรอบนี้จะได้ชื่อเองเมื่อ snapshot ของรุ่นนั้นถูกเก็บ)
+    const MAX_PER_REQUEST_LOOKUPS = 25;
+    const missing = stillMissing().slice(0, MAX_PER_REQUEST_LOOKUPS);
+    if (missing.length) {
+      const CONCURRENCY = 5;
+      for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        await Promise.all(missing.slice(i, i + CONCURRENCY).map(async (code) => {
+          try {
+            const s = await schoolos.getStudentByCode(code, { yearDepth: 1 });
+            if (s) setInfo(s);
+          } catch { /* ข้าม */ }
+        }));
+      }
     }
 
     const result = rows.map(r => ({
       ...r,
       student: nameMap.get(String(r.student_code)) || nameMap.get(normCode(r.student_code)) || null,
     }));
-
-    // 2) รหัสที่ยังหาชื่อไม่เจอ (นักเรียนเก่า/คนละปี) → ดึงรายคน (จำกัด concurrency)
-    const missing = [...new Set(result.filter(r => !r.student).map(r => r.student_code))];
-    if (missing.length) {
-      const CONCURRENCY = 5;
-      for (let i = 0; i < missing.length; i += CONCURRENCY) {
-        await Promise.all(missing.slice(i, i + CONCURRENCY).map(async (code) => {
-          try {
-            const s = await schoolos.getStudentByCode(code);
-            if (s) setInfo(s);
-          } catch { /* ข้าม */ }
-        }));
-      }
-      for (const r of result) {
-        if (!r.student) r.student = nameMap.get(normCode(r.student_code)) || null;
-      }
-    }
 
     res.json(result);
   } catch (err) {
