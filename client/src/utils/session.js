@@ -19,6 +19,7 @@ const ACTIVITY_WRITE_INTERVAL_MS = 30 * 1000;
 
 const LAST_ACTIVITY_KEY = 'lastActivity';
 const LOGOUT_REASON_KEY = 'logoutReason';
+const LOGOUT_AT_KEY = 'logoutAt';
 
 export const TOKEN_KEY = 'token';
 export const USER_KEY = 'user';
@@ -77,9 +78,36 @@ export function isTokenExpired(token) {
 
 // เขียนทุกครั้งที่ session จบ — ส่ง null เมื่อผู้ใช้กดออกเอง เพื่อล้างเหตุผลเก่าทิ้ง
 // (ไม่งั้นกดออกเองแล้วยังเห็นข้อความ "หมดเวลา" จากรอบก่อนค้างอยู่)
+//
+// เก็บ "เมื่อไหร่" ไว้ด้วย เพราะเหตุผลนี้เป็นคำอธิบายของ *ตอนนี้* ไม่ใช่ตราประทับถาวร
+// ดู wasRecentlyLoggedOut()
 export function setLogoutReason(reason) {
-  if (reason) localStorage.setItem(LOGOUT_REASON_KEY, reason);
-  else localStorage.removeItem(LOGOUT_REASON_KEY);
+  if (reason) {
+    localStorage.setItem(LOGOUT_REASON_KEY, reason);
+    localStorage.setItem(LOGOUT_AT_KEY, String(Date.now()));
+  } else {
+    localStorage.removeItem(LOGOUT_REASON_KEY);
+    localStorage.removeItem(LOGOUT_AT_KEY);
+  }
+}
+
+/**
+ * เพิ่งถูกเตะออกไปหมาด ๆ หรือเปล่า (ไม่ใช่ "เคยถูกเตะเมื่อไหร่ก็ได้")
+ *
+ * ใช้ตัดสินสองอย่างที่ต้องไปด้วยกัน: จะโชว์ข้อความ "หมดเวลา" ไหม และจะข้าม
+ * silent SSO ไหม — เพราะถ้าเพิ่งโดนเตะ ผู้ใช้ควรได้เห็นเหตุผลแล้วกรอกรหัสเอง
+ *
+ * ⚠️ ห้ามดูแค่ว่า "มี logoutReason ค้างอยู่ไหม" — ค่านั้นถูกล้างตอนล็อกอินสำเร็จ
+ * เท่านั้น เบราว์เซอร์ที่เคยหมดเวลาสักครั้งจึงติดธงนี้ค้างข้ามวัน แล้ว silent SSO
+ * จะไม่ทำงานอีกเลยจนกว่าจะกรอกรหัสด้วยมือ (อาการ "บางเครื่องเข้าเอง บางเครื่องไม่เข้า")
+ *
+ * ไม่มี logoutAt = ข้อมูลจากเวอร์ชันก่อนหน้า → ถือว่าเก่าแล้ว
+ */
+export function wasRecentlyLoggedOut(withinMs = IDLE_TIMEOUT_MS) {
+  if (!localStorage.getItem(LOGOUT_REASON_KEY)) return false;
+  const at = Number(localStorage.getItem(LOGOUT_AT_KEY));
+  if (!Number.isFinite(at) || at <= 0) return false;
+  return Date.now() - at < withinMs;
 }
 
 // อ่านเฉย ๆ ไม่ลบ — คนที่ล้างคือ setLogoutReason() ตอนจบ session รอบถัดไป

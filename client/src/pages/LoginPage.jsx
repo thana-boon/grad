@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Icon from '../components/ui/Icon';
-import { LOGOUT_REASONS, getLogoutReason } from '../utils/session';
+import { LOGOUT_REASONS, getLogoutReason, wasRecentlyLoggedOut } from '../utils/session';
 import { isSilentLoginBlocked, trySilentLogin } from '../utils/sso';
 
 // ข้อความตอนถูกเตะออก — ต้องบอกให้ชัดว่าไม่ได้ล็อกอินหลุดเพราะระบบพัง
@@ -24,17 +24,21 @@ export default function LoginPage() {
 
   // เหตุผลที่หลุด ถูก AuthContext เก็บไว้ตอนเคลียร์ session — อ่านตรงนี้เพื่อบอกผู้ใช้
   // ว่าไม่ได้เด้งออกเพราะระบบพัง (ค่าถูกล้างตอนล็อกอินสำเร็จ/กดออกเอง ไม่ใช่ตอนอ่าน)
+  // เตือนเฉพาะตอนที่เพิ่งโดนเตะจริง ๆ — ค้างข้ามวันแล้วยังขึ้น "หมดเวลาใช้งาน"
+  // ให้คนที่เพิ่งเปิดเว็บมาเฉย ๆ คือข้อความที่ผิดบริบท
   const [noticeDismissed, setNoticeDismissed] = useState(false);
-  const notice = noticeDismissed ? '' : TIMEOUT_NOTICES[getLogoutReason()] || '';
+  const notice =
+    noticeDismissed || !wasRecentlyLoggedOut() ? '' : TIMEOUT_NOTICES[getLogoutReason()] || '';
 
   // ── silent SSO: ล็อกอิน SchoolOS ไว้แล้วก็เข้าได้เลย ─────────────────────────
   //
   // ข้ามเมื่อ:
   //   · เพิ่งถูกเตะออกเพราะหมดเวลา — ต้องกรอกเองใหม่ ไม่งั้น idle timeout ไร้ความหมาย
   //     และผู้ใช้จะไม่ทันเห็นด้วยซ้ำว่าโดนเตะออกเพราะอะไร
+  //     ("เพิ่ง" เท่านั้น — ไม่ใช่ "เคยโดนเมื่อไหร่ก็ได้" ดู wasRecentlyLoggedOut)
   //   · เพิ่งกดออกจากระบบ (ดู blockSilentLogin ใน utils/sso.js)
   const [checkingSso, setCheckingSso] = useState(
-    () => !getLogoutReason() && !isSilentLoginBlocked()
+    () => !wasRecentlyLoggedOut() && !isSilentLoginBlocked()
   );
   // StrictMode ตอน dev เรียก effect สองรอบ — กันไม่ให้ขอโค้ด handoff ซ้ำโดยเปล่าประโยชน์
   const ssoStarted = useRef(false);

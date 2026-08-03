@@ -11,7 +11,12 @@ import {
   setLogoutReason,
   setSessionExpiredHandler,
 } from '../utils/session';
-import { blockSilentLogin, clearSilentLoginBlock, logoutFromSchoolOS } from '../utils/sso';
+import {
+  blockSilentLogin,
+  clearSilentLoginBlock,
+  logoutFromSchoolOS,
+  refreshSchoolOSSession,
+} from '../utils/sso';
 
 const AuthContext = createContext(null);
 
@@ -19,6 +24,10 @@ const AuthContext = createContext(null);
 // (setTimeout ยาว ๆ ตัวเดียวไม่พอ: เครื่องที่ sleep แล้วตื่นมา timer จะเพี้ยน
 //  แต่การเทียบ timestamp ทุกรอบแบบนี้ให้ผลถูกเสมอ)
 const CHECK_INTERVAL_MS = 15 * 1000;
+
+// รอบต่ออายุ session ฝั่ง SchoolOS ระหว่างที่ยังนั่งใช้งาน GradTrack อยู่
+// ต้องถี่กว่า idle window ของ SchoolOS (30 นาที) พอสมควร ไม่งั้นต่อไม่ทัน
+const SOS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 // เหตุการณ์ที่นับว่า "ยังใช้งานอยู่" — ต้องเป็นการกระทำจริงของผู้ใช้
 // ไม่นับ mousemove เปล่า ๆ เพราะเมาส์สะเทือนบนโต๊ะก็ต่ออายุ session ได้
@@ -130,6 +139,13 @@ export function AuthProvider({ children }) {
 
     const timer = setInterval(check, CHECK_INTERVAL_MS);
 
+    // ต่ออายุ session ของ SchoolOS ตามการใช้งานจริงในระบบนี้ — ต่อเฉพาะตอนที่
+    // ผู้ใช้ยังอยู่จริง (check() ผ่าน) ไม่ใช่ต่อให้แท็บที่เปิดค้างไว้เฉย ๆ
+    // ซึ่งจะทำให้ session ของทั้งแพลตฟอร์มไม่มีวันหมดอายุ
+    const sosTimer = setInterval(() => {
+      if (check()) refreshSchoolOSSession();
+    }, SOS_REFRESH_INTERVAL_MS);
+
     // กลับมาที่แท็บ/ปลุกเครื่องจาก sleep → ตรวจทันที ไม่ต้องรอครบรอบ
     // ต่ออายุเฉพาะตอนที่ยังไม่หมดเวลา ไม่งั้นจะไปเขียน lastActivity ทับหลัง
     // clearSession() เพิ่งล้างทิ้ง — เหลือขยะค้างไว้ให้รอบหน้าสับสน
@@ -152,6 +168,7 @@ export function AuthProvider({ children }) {
         window.removeEventListener(evt, onActivity, { capture: true });
       }
       clearInterval(timer);
+      clearInterval(sosTimer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('storage', onStorage);
     };

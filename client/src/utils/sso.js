@@ -96,6 +96,31 @@ export async function trySilentLogin() {
 }
 
 /**
+ * ต่ออายุ session ของ SchoolOS
+ *
+ * จำเป็นเพราะ SchoolOS **ไม่นับ** การใช้งานในระบบเราเป็น activity ของ session
+ * (API.md §4.10 จงใจให้เป็นแบบนี้ ไม่งั้นแท็บที่เปิดค้างไว้จะทำให้ session ไม่มีวันตาย)
+ * ครูที่นั่งทำงานใน GradTrack เกิน 30 นาทีโดยไม่แตะหน้า SchoolOS เลยจึงหลุดเงียบ ๆ
+ * แล้วรอบหน้าที่เปิด /grad ก็ต้องกรอกรหัสใหม่ทั้งที่เพิ่งใช้งานอยู่แท้ ๆ
+ *
+ * เงียบเสมอ: 401 = ไม่มี session ให้ต่อ (ล็อกอินด้วยรหัสผ่านมา ไม่ได้มาทาง SSO)
+ * ซึ่งเป็นเรื่องปกติ ไม่ใช่ error
+ */
+export async function refreshSchoolOSSession() {
+  try {
+    const config = await loadConfig();
+    if (!config?.enabled) return;
+    await fetch(usersUrl(config.usersBase, '/api/auth/refresh'), {
+      method: 'POST',
+      credentials: 'include',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+  } catch {
+    /* ต่อไม่ได้ก็ปล่อย — ผลอย่างมากคือต้องล็อกอิน SchoolOS ใหม่รอบหน้า */
+  }
+}
+
+/**
  * ออกจากระบบที่ SchoolOS ด้วย — ล้างแค่ฝั่งเราไม่พอ
  * ถ้าไม่เรียก cookie ยังอยู่ พอกลับมาหน้า login รอบหน้า probe จะพากลับเข้าระบบเอง
  * ซึ่งอันตรายมากกับเครื่องที่ใช้ร่วมกัน (ห้องคอม / ห้องพักครู)
