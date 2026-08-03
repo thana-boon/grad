@@ -167,17 +167,24 @@ router.get('/admin/admission-overview', verifyToken, staffRead, async (req, res)
 // เมื่อนักเรียนย้ายไปใช้รหัสผ่าน SchoolOS กันครบแล้ว
 const LEGACY_LOGIN_ENABLED = process.env.STUDENT_LEGACY_LOGIN !== '0';
 
+// ชั้นเรียนจาก SchoolOS มาเป็นข้อความ ("ม.6" / "ม. 6" / "ม.6/1" แล้วแต่ที่คีย์กันมา)
+// จึงเทียบแบบยืดหยุ่นเหมือนหน้ารายชื่อ ม.6 ของ admin ไม่ใช่ === 'ม.6'
+const isM6 = (level) => /^ม\.?\s*6/.test(String(level ?? '').trim());
+
 /**
  * นักเรียนคนนี้เข้าใช้ระบบได้ไหม + หาระเบียนของเขาให้ด้วย
- * ใช้ร่วมกันระหว่างล็อกอินด้วยรหัสผ่าน (/student/login) กับ silent SSO (/auth/sso)
+ * ใช้ร่วมกันทุกทางเข้า: รหัสผ่าน SchoolOS · legacy (/student/login) · silent SSO (/auth/sso)
  *
  * @param code    รหัสนักเรียน
  * @param active  รู้สถานะมาก่อนไหม (จาก /auth/verify) · null = ไม่รู้ ให้ดูจากระเบียนที่เจอ
  * @param status  สถานะจาก SchoolOS ('studying' | 'graduated' | ...) · null = ไม่รู้
+ * @param found   ผลจาก findStudentWithYear() ที่ผู้เรียกหามาแล้ว · null = ให้หาเอง
+ *                (ทาง legacy ต้องหาเองก่อนเพื่อเอา citizen_id มาเทียบรหัสผ่าน — ส่งต่อมาที่นี่
+ *                 จะได้ไม่ยิง API ค้นคนเดิมซ้ำอีกรอบ)
  * @returns { student } (student เป็น null ได้ = หาไม่เจอ ผู้เรียกตัดสินต่อเอง)
  *          หรือ { denied: { status, reason, message } }
  */
-async function checkStudentAccess({ code, active = null, status = null }) {
+async function checkStudentAccess({ code, active = null, status = null, found = null }) {
   // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออก/พักการเรียนด้วย (API.md §4.9)
   // ระบบปลายทางต้องตัดสินเองว่าใครเข้าได้ — ที่นี่ใช้เกณฑ์ "รุ่นที่เพิ่งจบ"
   //
@@ -191,8 +198,8 @@ async function checkStudentAccess({ code, active = null, status = null }) {
   const isGraduated = (s) => String(s || '') === 'graduated';
   if (active === false && !isGraduated(status)) return { denied: notStudying };
 
-  const found = await schoolos.findStudentWithYear(code);
-  const student = found.student;
+  const record = found ?? (await schoolos.findStudentWithYear(code));
+  const student = record.student;
 
   // ทาง SSO ไม่มี active/status ติดมากับ session (API.md §4.11) → อ่านจากระเบียนที่เจอแทน
   const effStatus = status ?? student?.status ?? null;
@@ -217,16 +224,36 @@ async function checkStudentAccess({ code, active = null, status = null }) {
     // โรงเรียนทำจบราวเดือน มี.ค. แต่ผล TCAS รอบ 3/4 ออก พ.ค.–มิ.ย.
     // ถ้าปิดตอนจบทันที เด็กจะกรอกผลรอบท้าย ๆ ไม่ได้เลย จึงเปิดต่อให้อีกรุ่นหนึ่ง
     // แล้วปิดเองเมื่อรุ่นถัดไปจบ (isRecentYear) — ไม่ต้องตั้งวันหมดอายุทุกปี
-    if (!(found.yearId && (await schoolos.isRecentYear(found.yearId)))) {
+    if (!(record.yearId && (await schoolos.isRecentYear(record.yearId)))) {
       return {
         denied: {
           status: 403,
           reason: 'old_cohort',
-          yearId: found.yearId,
+          yearId: record.yearId,
           message: 'รุ่นของคุณปิดการเข้าใช้งานแล้ว หากต้องการแก้ไขข้อมูล กรุณาติดต่อครูแนะแนว',
         },
       };
     }
+  }
+
+  // ─── ชั้น ม.6 เท่านั้น ─────────────────────────────────────────────────────
+  // ระบบนี้เก็บผลสอบเข้ามหาวิทยาลัย ม.1–ม.5 จึงยังไม่มีอะไรให้ทำ และไม่ควรเห็นข้อมูลรุ่นพี่
+  //
+  // ต้องเช็กคนที่จบไปแล้วด้วย ไม่ใช่เฉพาะคนที่กำลังเรียน — เด็กที่จบ ม.3 แล้วออกไป
+  // ก็ได้ status 'graduated' เหมือนกัน ถ้าเช็กแค่คนที่กำลังเรียนก็หลุดเข้ามาทางนั้นได้
+  // (ระเบียนของคนที่จบมาจากปีที่เขายังอยู่ ชั้นจึงเป็นชั้นสุดท้ายที่เรียน)
+  //
+  // ชั้นว่าง/อ่านไม่ออก = ตัดสินไม่ได้ → ปิดไว้ก่อน แล้วส่ง classLevel ให้ผู้เรียก log
+  // จะได้เห็นทันทีว่าเป็นเพราะข้อมูลไม่ครบ ไม่ใช่เด็กชั้นอื่นจริง ๆ
+  if (student && !isM6(student.class_level)) {
+    return {
+      denied: {
+        status: 403,
+        reason: 'not_m6',
+        classLevel: student.class_level || null,
+        message: 'ระบบนี้เปิดให้เฉพาะนักเรียนชั้น ม.6 เท่านั้น',
+      },
+    };
   }
 
   return { student, graduated: !effActive };
@@ -307,7 +334,8 @@ router.post('/login', loginLimiter, async (req, res) => {
       });
       if (gate.denied) {
         logger.warn(`Student login blocked: ${gate.denied.reason}`, {
-          username: paddedCode, status: sosUser.status, year_id: gate.denied.yearId,
+          username: paddedCode, status: sosUser.status,
+          year_id: gate.denied.yearId, class_level: gate.denied.classLevel,
         });
         return res.status(gate.denied.status).json({ message: gate.denied.message });
       }
@@ -319,11 +347,21 @@ router.post('/login', loginLimiter, async (req, res) => {
 
     // ── 2) legacy: Skdw + เลขบัตรประชาชน ─────────────────────────────────────
     if (!student && LEGACY_LOGIN_ENABLED) {
-      const found = await schoolos.getStudentByCode(paddedCode);
+      const found = await schoolos.findStudentWithYear(paddedCode);
       // ต้องมี citizen_id จริง (key มี scope students:pii) ถึงจะเทียบได้
       // ถ้า scope ปิดอยู่ citizen_id เป็น undefined → ห้ามยอมให้ผ่านด้วยคำว่า "Skdw" เปล่า ๆ
-      if (found?.citizen_id && password === `Skdw${found.citizen_id}`) {
-        student = found;
+      if (found.student?.citizen_id && password === `Skdw${found.student.citizen_id}`) {
+        // ทางนี้ก็ต้องผ่านด่านเดียวกับทางอื่น (ชั้น ม.6 · รุ่นที่ยังเปิด) — รหัสผ่านถูก
+        // ไม่ได้แปลว่ามีสิทธิ์ใช้ระบบ ถ้าปล่อยผ่านตรงนี้ กติกาจะหลุดกันคนละทางทันที
+        const gate = await checkStudentAccess({ code: paddedCode, found });
+        if (gate.denied) {
+          logger.warn(`Student login blocked: ${gate.denied.reason}`, {
+            username: paddedCode, via: 'legacy',
+            year_id: gate.denied.yearId, class_level: gate.denied.classLevel,
+          });
+          return res.status(gate.denied.status).json({ message: gate.denied.message });
+        }
+        student = gate.student;
         via = 'legacy';
       }
     }

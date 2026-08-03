@@ -81,6 +81,7 @@ router.post('/', ssoLimiter, async (req, res) => {
       if (gate.denied) {
         logger.warn(`SSO blocked (student): ${gate.denied.reason}`, {
           student_code: identity, year_id: gate.denied.yearId,
+          class_level: gate.denied.classLevel,
         });
         return res.status(gate.denied.status).json({ message: gate.denied.message });
       }
