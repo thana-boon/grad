@@ -12,8 +12,13 @@ const jwt = require('jsonwebtoken');
 // รูปแบบค่าตาม zeit/ms เช่น '30m' · '8h' · '7d' (ตัวเลขเปล่า = วินาที)
 const EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 
-function signToken(payload) {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: EXPIRES_IN });
+/**
+ * @param expiresIn ทับอายุเริ่มต้นได้ — ใช้ตอนรับช่วง session มาจาก SchoolOS (silent SSO)
+ *   ซึ่ง token ของเราต้องไม่มีอายุยาวเกิน session ต้นทาง ไม่งั้นผู้ใช้จะ "ยังอยู่ใน
+ *   GradTrack" ทั้งที่ SchoolOS หมดอายุไปแล้ว (ดู routes/sso.js)
+ */
+function signToken(payload, { expiresIn } = {}) {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: expiresIn || EXPIRES_IN });
 }
 
 module.exports = { signToken, EXPIRES_IN };

@@ -46,6 +46,14 @@ services:
       # ตั้ง 0 เพื่อปิดทางเดิม "Skdw+เลขบัตรประชาชน" เมื่อย้ายกันครบแล้ว
       STUDENT_LEGACY_LOGIN: ${STUDENT_LEGACY_LOGIN:-1}
 
+      # ─── Silent SSO — ล็อกอิน SchoolOS ไว้แล้วเข้าได้เลย (ตั้ง 0 เพื่อปิด) ───
+      SSO_SILENT_LOGIN: ${SSO_SILENT_LOGIN:-1}
+      # ที่อยู่ SchoolOS "ในสายตาเบราว์เซอร์" — path ล้วน = โดเมนเดียวกัน (same-origin)
+      # คนละตัวกับ SCHOOLOS_API_BASE ซึ่งเป็นที่อยู่ภายในที่ server ใช้
+      SCHOOLOS_WEB_BASE: ${SCHOOLOS_WEB_BASE-/users}
+      # ต้องตรงกับช่อง "ระบบปลายทาง (audience)" ของ API key ใบนี้เป๊ะ ๆ
+      SCHOOLOS_HANDOFF_AUDIENCE: ${SCHOOLOS_HANDOFF_AUDIENCE:-grad}
+
       # จำนวน proxy hop ที่เชื่อ X-Forwarded-For (nginx portal = 1)
       # ผิดค่านี้ = rate limit ตอน login นับรวมทั้งโรงเรียนเป็นถังเดียว
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}

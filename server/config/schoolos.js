@@ -39,6 +39,20 @@ class SosRateLimitError extends Error {
   }
 }
 
+/**
+ * โค้ด handoff แลกไม่ได้ (หมดอายุ / ถูกใช้ไปแล้ว / ไม่มีในระบบ)
+ *
+ * แยกจาก SosKeyError เพราะแก้คนละทาง: อันนี้แค่ "ขอโค้ดใหม่หรือไปหน้า login ปกติ"
+ * ส่วน SosKeyError คือ config ของเราเองผิด ต้องตามผู้ดูแล
+ */
+class SosHandoffError extends Error {
+  constructor(code) {
+    super(`handoff_${code}`);
+    this.name = 'SosHandoffError';
+    this.code = code;
+  }
+}
+
 async function sos(path, init) {
   if (!BASE) throw new SosKeyError('no_base_url');
   if (!KEY) throw new SosKeyError('no_key');
@@ -501,6 +515,20 @@ async function listTeachers(params = {}) {
   };
 }
 
+/**
+ * หาครูจากรหัสครู — `q` ค้นได้ทั้งชื่อและรหัส จึงต้องกรองซ้ำให้ตรงเป๊ะเอง
+ *
+ * status เริ่มต้น 'active' ตาม API — "หาไม่เจอ" จึงแปลว่าไม่ใช่ครูปัจจุบัน
+ * (ลาออกแล้ว/ไม่มีตัวตน) ถ้าอยากแยกสองกรณีนั้นให้เรียกซ้ำด้วย status:'all'
+ */
+async function findTeacher(rawCode, { status = 'active' } = {}) {
+  const code = String(rawCode || '').trim();
+  if (!code) return null;
+
+  const { data } = await listTeachers({ q: code, limit: MAX_PAGE_SIZE, status });
+  return (data || []).find((t) => String(t.teacher_code).trim() === code) || null;
+}
+
 /** ดึงครูทุกหน้า (วนตาม pagination เหมือน listAllStudents) */
 async function listAllTeachers(params = {}) {
   const limit = Math.min(Number(params.limit) || MAX_PAGE_SIZE, MAX_PAGE_SIZE);
@@ -562,6 +590,52 @@ async function verify(role, username, password) {
   return data.user; // { id, code, name, role, active, status }
 }
 
+// ─── SSO handoff ─────────────────────────────────────────────────────────────
+/**
+ * แลกโค้ด handoff เป็นตัวตนของผู้ใช้ (API.md §4.11)
+ *
+ * เบราว์เซอร์เป็นคนขอโค้ดมาเอง (มี cookie ของ SchoolOS อยู่แล้ว) แล้วส่งมาให้เรา
+ * — โค้ดอายุ 60 วินาที ใช้ได้ครั้งเดียว และไร้ค่าถ้าไม่มี API key ของเราคู่กัน
+ * จึงเป็นวิธีเดียวที่ server ของระบบอื่นจะรู้ได้ว่า "ใครล็อกอิน SchoolOS อยู่"
+ * โดยไม่ต้องเปิดให้ JS อ่าน token (ซึ่งคือการทิ้ง HttpOnly)
+ *
+ * ⚠️ ห้ามยิงซ้ำด้วยโค้ดเดิมเมื่อพลาด — จะได้ used_code ซึ่งแปลว่าบั๊กฝั่งเรา
+ *
+ * คืน { user: { sub, code, name, role, permissions }, audience, expiresAt, absoluteEndsAt }
+ *   · user.role มีแค่ 'teacher' | 'student' และ **ไม่มี** active/status ติดมา
+ *     คนที่ลาออก/จบไปแล้วอาจยังมี session อยู่ → ต้องตรวจเองจากทะเบียนครู/นักเรียน
+ * โยน SosHandoffError = โค้ดใช้ไม่ได้ (ผู้ใช้ไปหน้า login ตามปกติ)
+ * โยน SosKeyError     = key/audience ของเราตั้งไม่ครบ — ต้องตามผู้ดูแล SchoolOS
+ */
+const HANDOFF_KEY_ERRORS = ['invalid_key', 'insufficient_scope', 'key_revoked', 'key_audience_unset'];
+
+async function redeemHandoff(handoffCode) {
+  let res;
+  try {
+    res = await sos('/auth/handoff/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ code: handoffCode }),
+    });
+  } catch (err) {
+    if (err instanceof SosKeyError) throw err;
+    logger.error('SchoolOS handoff unreachable', { error: err.message });
+    throw new Error(`SchoolOS handoff: ต่อ ${BASE} ไม่ได้ (${err.cause?.code || err.message})`);
+  }
+
+  if (!res.ok) {
+    const code = (await errorCode(res)) || String(res.status);
+    if (HANDOFF_KEY_ERRORS.includes(code)) {
+      logger.error('SchoolOS handoff rejected key', { status: res.status, code });
+      throw new SosKeyError(code);
+    }
+    throw new SosHandoffError(code);
+  }
+
+  const data = await res.json();
+  if (!data?.valid || !data.user) throw new SosHandoffError('invalid_code');
+  return data;
+}
+
 // ─── รูปโปรไฟล์ ──────────────────────────────────────────────────────────────
 /**
  * โหลดรูปจาก SchoolOS แล้วแปลงเป็น data URL
@@ -619,10 +693,13 @@ module.exports = {
   getAcademicYearById,
   listTeachers,
   listAllTeachers,
+  findTeacher,
   fetchPhotoDataUrl,
   verify,
+  redeemHandoff,
   me,
   SosKeyError,
   SosRateLimitError,
+  SosHandoffError,
   BASE,
 };

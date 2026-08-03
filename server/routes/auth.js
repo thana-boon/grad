@@ -18,25 +18,93 @@ const { resolveAccess } = require('./staff');
  * จึงต้องดึงระเบียนครูที่แยกฟิลด์ชื่อไว้แล้วมาอีกที
  *
  * ล้มเหลวเมื่อไหร่ก็แค่ไม่มีรูป/ไม่มีชื่อจริง — ห้ามทำให้ล็อกอินพัง
+ *
+ * ทาง silent SSO ดึงระเบียนครูไปแล้วตั้งแต่ตอนตรวจสถานะ จึงส่งต่อมาให้ตรงนี้ได้เลย
+ * (teacher) ไม่ต้องยิง SchoolOS ซ้ำอีกรอบ
  */
-async function loadStaffProfile(sosUser) {
+async function loadStaffProfile(sosUser, teacher) {
   const code = String(sosUser?.code || '').trim();
   if (!code) return {};
 
   try {
-    // q ค้นได้ทั้งชื่อและรหัส จึงต้องกรองซ้ำให้ตรงรหัสเป๊ะ ๆ เอง
-    const { data } = await schoolos.listTeachers({ q: code, limit: 50 });
-    const teacher = (data || []).find((t) => String(t.teacher_code).trim() === code);
-    if (!teacher) return {};
+    const record = teacher || (await schoolos.findTeacher(code));
+    if (!record) return {};
 
     return {
-      first_name: teacher.first_name || '',
-      avatar: await schoolos.fetchPhotoDataUrl(teacher.photo_path),
+      first_name: record.first_name || '',
+      avatar: await schoolos.fetchPhotoDataUrl(record.photo_path),
     };
   } catch (err) {
     logger.warn('Load SchoolOS staff profile failed', { code, error: err.message });
     return {};
   }
+}
+
+/**
+ * ออก session ของครู/ผู้ดูแลจากตัวตนที่ SchoolOS ยืนยันมาแล้ว
+ * ใช้ร่วมกันระหว่างล็อกอินด้วยรหัสผ่าน (/login) กับ silent SSO (/sso)
+ *
+ * @param sosUser  { id, code, name, role, active, status } — โครงเดียวกับที่ /auth/verify ตอบ
+ * @param teacher  ระเบียนครูที่ดึงมาแล้ว (ถ้ามี) ไว้ประหยัดโควตา API
+ * @param expiresIn อายุ token ที่อยากจำกัด (วินาที) — ไม่ส่ง = ใช้ JWT_EXPIRES_IN
+ * @returns { token, user, access } · หรือ { denied: { status, reason, message } } เมื่อไม่ให้เข้า
+ */
+async function issueStaffSession(sosUser, { teacher = null, expiresIn } = {}) {
+  // SchoolOS ตอบ valid:true ให้ครูที่ลาออกแล้วด้วย (พร้อม active:false)
+  // ระบบผู้เรียกต้องตรวจเอง — GradTrack ไม่ให้เข้า
+  if (!sosUser.active) {
+    return {
+      denied: {
+        status: 403,
+        reason: 'inactive',
+        message: 'บัญชีนี้ถูกปิดใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ',
+      },
+    };
+  }
+
+  // ต้องอยู่ในรายชื่อที่ผู้ดูแลเพิ่มไว้ (หน้า "จัดการผู้ใช้งาน")
+  // ยกเว้นตอนรายชื่อยังว่าง = ยังไม่เปิดใช้ allowlist → เข้าได้แบบเดิม
+  const access = await resolveAccess(sosUser);
+  if (!access) {
+    return {
+      denied: {
+        status: 403,
+        reason: 'not_allowlisted',
+        message: 'บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าใช้ระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มรายชื่อ',
+      },
+    };
+  }
+
+  const role = access.role;
+  const profile = await loadStaffProfile(sosUser, teacher);
+  const token = signToken(
+    {
+      id: sosUser.id,
+      username: sosUser.code,
+      name: sosUser.name,
+      role,
+      source: 'schoolos',
+    },
+    { expiresIn }
+  );
+
+  return {
+    access,
+    token,
+    user: {
+      id: sosUser.id,
+      username: sosUser.code,
+      name: sosUser.name,
+      // ไว้ทำอักษรย่อบน avatar เมื่อไม่มีรูป — ตัดปัญหาคำนำหน้าปนมากับ name
+      first_name: profile.first_name || '',
+      // data URL หรือ null (ไม่มีรูปใน SchoolOS / ดึงไม่สำเร็จ)
+      avatar: profile.avatar || null,
+      role,
+      source: 'schoolos',
+      // ให้ฝั่ง client ซ่อนปุ่มแก้ไขได้เลยโดยไม่ต้องเดาจาก role string
+      readOnly: role === ROLES.TEACHER,
+    },
+  };
 }
 
 // POST /api/auth/login  — ล็อกอินฝั่งครู/ผู้ดูแล
@@ -85,59 +153,34 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    // SchoolOS ตอบ valid:true ให้ครูที่ลาออกแล้วด้วย (พร้อม active:false)
-    // ระบบผู้เรียกต้องตรวจเอง — GradTrack ไม่ให้เข้า
-    if (!sosUser.active) {
-      logger.warn('Login blocked: inactive SchoolOS account', { username: uname, status: sosUser.status });
-      return res.status(403).json({ message: 'บัญชีนี้ถูกปิดใช้งานแล้ว กรุณาติดต่อผู้ดูแลระบบ' });
-    }
-
-    // ── 3) ต้องอยู่ในรายชื่อที่ผู้ดูแลเพิ่มไว้ (หน้า "จัดการผู้ใช้งาน") ─────────
-    // ยกเว้นตอนรายชื่อยังว่าง = ยังไม่เปิดใช้ allowlist → เข้าได้แบบเดิม
-    const access = await resolveAccess(sosUser);
-    if (!access) {
-      logger.warn('Login blocked: not in staff allowlist', { username: uname, sosRole: sosUser.role });
-      return res.status(403).json({
-        message: 'บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าใช้ระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มรายชื่อ',
+    // ── 3) สถานะ + รายชื่อที่ผู้ดูแลเพิ่มไว้ ───────────────────────────────────
+    const { denied, access, token, user } = await issueStaffSession(sosUser);
+    if (denied) {
+      logger.warn(`Login blocked: ${denied.reason}`, {
+        username: uname,
+        status: sosUser.status,
+        sosRole: sosUser.role,
       });
+      return res.status(denied.status).json({ message: denied.message });
     }
-
-    const role = access.role;
-    const profile = await loadStaffProfile(sosUser);
-    const token = signToken({
-      id: sosUser.id,
-      username: sosUser.code,
-      name: sosUser.name,
-      role,
-      source: 'schoolos',
-    });
 
     logger.info('Login success (schoolos)', {
       username: uname,
       sosRole: sosUser.role,
-      role,
+      role: user.role,
       // ผ่านด่านมาทางไหน: allowlist | schoolos-admin | open (ดู resolveAccess)
       access: access.via,
       ip: req.ip,
     });
-    logActivity({ username: sosUser.code, name: sosUser.name, role, action: 'login', target: 'schoolos' });
-
-    return res.json({
-      token,
-      user: {
-        id: sosUser.id,
-        username: sosUser.code,
-        name: sosUser.name,
-        // ไว้ทำอักษรย่อบน avatar เมื่อไม่มีรูป — ตัดปัญหาคำนำหน้าปนมากับ name
-        first_name: profile.first_name || '',
-        // data URL หรือ null (ไม่มีรูปใน SchoolOS / ดึงไม่สำเร็จ)
-        avatar: profile.avatar || null,
-        role,
-        source: 'schoolos',
-        // ให้ฝั่ง client ซ่อนปุ่มแก้ไขได้เลยโดยไม่ต้องเดาจาก role string
-        readOnly: role === ROLES.TEACHER,
-      },
+    logActivity({
+      username: sosUser.code,
+      name: sosUser.name,
+      role: user.role,
+      action: 'login',
+      target: 'schoolos',
     });
+
+    return res.json({ token, user });
   } catch (err) {
     // key ของ GradTrack เองมีปัญหา — ห้ามกลืนเป็น 401 เด็ดขาด ไม่งั้นอาการจะไปโผล่
     // หน้า login ว่า "รหัสผ่านไม่ถูกต้อง" ทั้งที่ผู้ใช้กรอกถูก แล้วไล่หาสาเหตุไม่เจอ
@@ -160,3 +203,5 @@ router.post('/login', loginLimiter, async (req, res) => {
 });
 
 module.exports = router;
+// silent SSO ออก session ให้ครูด้วยกติกาเดียวกับล็อกอินด้วยรหัสผ่าน (ดู routes/sso.js)
+module.exports.issueStaffSession = issueStaffSession;

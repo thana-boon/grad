@@ -167,6 +167,124 @@ router.get('/admin/admission-overview', verifyToken, staffRead, async (req, res)
 // เมื่อนักเรียนย้ายไปใช้รหัสผ่าน SchoolOS กันครบแล้ว
 const LEGACY_LOGIN_ENABLED = process.env.STUDENT_LEGACY_LOGIN !== '0';
 
+/**
+ * นักเรียนคนนี้เข้าใช้ระบบได้ไหม + หาระเบียนของเขาให้ด้วย
+ * ใช้ร่วมกันระหว่างล็อกอินด้วยรหัสผ่าน (/student/login) กับ silent SSO (/auth/sso)
+ *
+ * @param code    รหัสนักเรียน
+ * @param active  รู้สถานะมาก่อนไหม (จาก /auth/verify) · null = ไม่รู้ ให้ดูจากระเบียนที่เจอ
+ * @param status  สถานะจาก SchoolOS ('studying' | 'graduated' | ...) · null = ไม่รู้
+ * @returns { student } (student เป็น null ได้ = หาไม่เจอ ผู้เรียกตัดสินต่อเอง)
+ *          หรือ { denied: { status, reason, message } }
+ */
+async function checkStudentAccess({ code, active = null, status = null }) {
+  // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออก/พักการเรียนด้วย (API.md §4.9)
+  // ระบบปลายทางต้องตัดสินเองว่าใครเข้าได้ — ที่นี่ใช้เกณฑ์ "รุ่นที่เพิ่งจบ"
+  //
+  // เปิดเฉพาะ "จบการศึกษา" เท่านั้น — ลาออก/พ้นสภาพระหว่างทางตัดทิ้งตั้งแต่ตรงนี้
+  // ก่อนไปค้นรายชื่อ จะได้ไม่เปลืองโควตา API ให้คนที่ยังไงก็เข้าไม่ได้
+  const notStudying = {
+    status: 403,
+    reason: 'inactive',
+    message: 'บัญชีนี้ไม่ได้อยู่ในสถานะกำลังศึกษา',
+  };
+  const isGraduated = (s) => String(s || '') === 'graduated';
+  if (active === false && !isGraduated(status)) return { denied: notStudying };
+
+  const found = await schoolos.findStudentWithYear(code);
+  const student = found.student;
+
+  // ทาง SSO ไม่มี active/status ติดมากับ session (API.md §4.11) → อ่านจากระเบียนที่เจอแทน
+  const effStatus = status ?? student?.status ?? null;
+  const effActive = active ?? (String(effStatus || '') === 'studying');
+
+  if (!effActive) {
+    if (!isGraduated(effStatus)) {
+      // ทาง SSO ไม่มีสถานะมาให้เลย "หาไม่เจอ" จึงแปลว่าไม่มีระเบียนให้ตัดสิน
+      // ไม่ใช่ "ไม่ได้กำลังศึกษา" — ต้องบอกให้ตรงเหตุ ไม่งั้นไล่หาสาเหตุกันคนละทาง
+      if (!student) {
+        return {
+          denied: {
+            status: 403,
+            reason: 'not_found',
+            message: 'ไม่พบข้อมูลนักเรียนของคุณในระบบ กรุณาติดต่อครูแนะแนว',
+          },
+        };
+      }
+      return { denied: notStudying };
+    }
+
+    // โรงเรียนทำจบราวเดือน มี.ค. แต่ผล TCAS รอบ 3/4 ออก พ.ค.–มิ.ย.
+    // ถ้าปิดตอนจบทันที เด็กจะกรอกผลรอบท้าย ๆ ไม่ได้เลย จึงเปิดต่อให้อีกรุ่นหนึ่ง
+    // แล้วปิดเองเมื่อรุ่นถัดไปจบ (isRecentYear) — ไม่ต้องตั้งวันหมดอายุทุกปี
+    if (!(found.yearId && (await schoolos.isRecentYear(found.yearId)))) {
+      return {
+        denied: {
+          status: 403,
+          reason: 'old_cohort',
+          yearId: found.yearId,
+          message: 'รุ่นของคุณปิดการเข้าใช้งานแล้ว หากต้องการแก้ไขข้อมูล กรุณาติดต่อครูแนะแนว',
+        },
+      };
+    }
+  }
+
+  return { student, graduated: !effActive };
+}
+
+/**
+ * ออก session ของนักเรียนหลังผ่านด่านของ checkStudentAccess() แล้ว
+ * @returns { token, user } — โครงเดียวกับที่ /student/login เคยตอบ
+ */
+async function buildStudentSession(student, { username, via, expiresIn } = {}) {
+  const code = student.student_code;
+
+  // สร้าง profile ถ้ายังไม่มี (ON CONFLICT กันกรณีล็อกอินซ้อนกันสองแท็บ)
+  await db.query(
+    `INSERT INTO student_profiles (student_code, year_id) VALUES (?, 0)
+     ON CONFLICT (student_code) DO NOTHING`,
+    [code]
+  );
+  const [[profile]] = await db.query(
+    'SELECT quote, photo_url FROM student_profiles WHERE student_code = ?',
+    [code]
+  );
+
+  const token = signToken(
+    { student_code: code, username: username || code, role: 'student' },
+    { expiresIn }
+  );
+
+  // รูปจาก SchoolOS ใช้เป็นรูปสำรองของ avatar เมื่อยังไม่ได้อัปโหลดรูปในระบบนี้
+  // (photo_url ที่นักเรียนอัปเองยังเป็นตัวหลักเสมอ — ใช้ในหน้า "ของฉัน"/รายงาน)
+  const avatar = await schoolos.fetchPhotoDataUrl(student.photo_path);
+
+  logActivity({
+    username: username || code,
+    name: `${student.first_name} ${student.last_name}`,
+    role: 'student',
+    action: 'login',
+    target: via,
+  });
+
+  return {
+    token,
+    user: {
+      student_code: code,
+      username: username || code,
+      title_prefix: student.title_prefix,
+      first_name: student.first_name,
+      last_name: student.last_name,
+      class_level: student.class_level,
+      class_room: student.class_room,
+      role: 'student',
+      quote: profile?.quote || '',
+      photo_url: profile?.photo_url || null,
+      avatar,
+    },
+  };
+}
+
 router.post('/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
@@ -182,32 +300,19 @@ router.post('/login', loginLimiter, async (req, res) => {
     // ── 1) รหัสผ่าน SchoolOS ──────────────────────────────────────────────────
     const sosUser = await schoolos.verify('student', paddedCode, password);
     if (sosUser) {
-      // SchoolOS ตอบ valid:true ให้เด็กที่จบ/ลาออก/พักการเรียนด้วย (API.md §4.9)
-      // ระบบปลายทางต้องตัดสินเองว่าใครเข้าได้ — ที่นี่ใช้เกณฑ์ "รุ่นที่เพิ่งจบ"
-      //
-      // เปิดเฉพาะ "จบการศึกษา" เท่านั้น — ลาออก/พ้นสภาพระหว่างทางตัดทิ้งตั้งแต่ตรงนี้
-      // ก่อนไปค้นรายชื่อ จะได้ไม่เปลืองโควตา API ให้คนที่ยังไงก็เข้าไม่ได้
-      const graduated = String(sosUser.status || '') === 'graduated';
-      if (!sosUser.active && !graduated) {
-        logger.warn('Student login blocked: inactive', { username: paddedCode, status: sosUser.status });
-        return res.status(403).json({ message: 'บัญชีนี้ไม่ได้อยู่ในสถานะกำลังศึกษา' });
+      const gate = await checkStudentAccess({
+        code: sosUser.code || paddedCode,
+        active: sosUser.active,
+        status: sosUser.status,
+      });
+      if (gate.denied) {
+        logger.warn(`Student login blocked: ${gate.denied.reason}`, {
+          username: paddedCode, status: sosUser.status, year_id: gate.denied.yearId,
+        });
+        return res.status(gate.denied.status).json({ message: gate.denied.message });
       }
 
-      const found = await schoolos.findStudentWithYear(sosUser.code || paddedCode);
-
-      // โรงเรียนทำจบราวเดือน มี.ค. แต่ผล TCAS รอบ 3/4 ออก พ.ค.–มิ.ย.
-      // ถ้าปิดตอนจบทันที เด็กจะกรอกผลรอบท้าย ๆ ไม่ได้เลย จึงเปิดต่อให้อีกรุ่นหนึ่ง
-      // แล้วปิดเองเมื่อรุ่นถัดไปจบ (isRecentYear) — ไม่ต้องตั้งวันหมดอายุทุกปี
-      if (!sosUser.active && !(found.yearId && await schoolos.isRecentYear(found.yearId))) {
-        logger.warn('Student login blocked: old cohort', {
-          username: paddedCode, status: sosUser.status, year_id: found.yearId,
-        });
-        return res.status(403).json({
-          message: 'รุ่นของคุณปิดการเข้าใช้งานแล้ว หากต้องการแก้ไขข้อมูล กรุณาติดต่อครูแนะแนว',
-        });
-      }
-
-      student = found.student;
+      student = gate.student;
       // แยก via ไว้ให้ audit log อ่านออกว่าเป็นการเข้าใช้ของศิษย์เก่า ไม่ใช่เด็กปัจจุบัน
       via = sosUser.active ? 'schoolos' : 'schoolos-alumni';
     }
@@ -228,52 +333,10 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    // สร้าง profile ถ้ายังไม่มี (ON CONFLICT กันกรณีล็อกอินซ้อนกันสองแท็บ)
-    await db.query(
-      `INSERT INTO student_profiles (student_code, year_id) VALUES (?, 0)
-       ON CONFLICT (student_code) DO NOTHING`,
-      [student.student_code]
-    );
-    const [[profile]] = await db.query(
-      'SELECT quote, photo_url FROM student_profiles WHERE student_code = ?',
-      [student.student_code]
-    );
-
-    const token = signToken({
-      student_code: student.student_code,
-      username: paddedCode,
-      role: 'student',
-    });
-
-    // รูปจาก SchoolOS ใช้เป็นรูปสำรองของ avatar เมื่อยังไม่ได้อัปโหลดรูปในระบบนี้
-    // (photo_url ที่นักเรียนอัปเองยังเป็นตัวหลักเสมอ — ใช้ในหน้า "ของฉัน"/รายงาน)
-    const avatar = await schoolos.fetchPhotoDataUrl(student.photo_path);
+    const session = await buildStudentSession(student, { username: paddedCode, via });
 
     logger.info('Student login success', { student_code: student.student_code, via, ip: req.ip });
-    logActivity({
-      username: paddedCode,
-      name: `${student.first_name} ${student.last_name}`,
-      role: 'student',
-      action: 'login',
-      target: via,
-    });
-
-    res.json({
-      token,
-      user: {
-        student_code: student.student_code,
-        username: paddedCode,
-        title_prefix: student.title_prefix,
-        first_name: student.first_name,
-        last_name: student.last_name,
-        class_level: student.class_level,
-        class_room: student.class_room,
-        role: 'student',
-        quote: profile?.quote || '',
-        photo_url: profile?.photo_url || null,
-        avatar,
-      },
-    });
+    res.json(session);
   } catch (err) {
     // key มีปัญหา ≠ ผู้ใช้กรอกผิด — ต้องแยกให้ชัด ไม่งั้นไล่หาสาเหตุไม่เจอ
     if (err instanceof schoolos.SosKeyError) {
@@ -1045,3 +1108,6 @@ router.delete('/admin/admissions/:id', verifyToken, adminOnly, async (req, res) 
 });
 
 module.exports = router;
+// silent SSO ใช้กติกาเดียวกันกับล็อกอินด้วยรหัสผ่าน (ดู routes/sso.js)
+module.exports.checkStudentAccess = checkStudentAccess;
+module.exports.buildStudentSession = buildStudentSession;

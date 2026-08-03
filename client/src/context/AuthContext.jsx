@@ -11,6 +11,7 @@ import {
   setLogoutReason,
   setSessionExpiredHandler,
 } from '../utils/session';
+import { blockSilentLogin, clearSilentLoginBlock, logoutFromSchoolOS } from '../utils/sso';
 
 const AuthContext = createContext(null);
 
@@ -78,6 +79,7 @@ export function AuthProvider({ children }) {
 
   const login = useCallback((userData, jwtToken) => {
     setLogoutReason(null); // ล็อกอินใหม่แล้ว — ข้อความ "หมดเวลา" รอบก่อนไม่ต้องค้าง
+    clearSilentLoginBlock();
     localStorage.setItem(USER_KEY, JSON.stringify(userData));
     localStorage.setItem(TOKEN_KEY, jwtToken);
     markActivity({ force: true }); // เริ่มจับเวลา idle ตั้งแต่วินาทีที่ล็อกอิน
@@ -85,7 +87,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   // กดออกเอง — ไม่ต้องขึ้นข้อความ "หมดเวลา" ที่หน้า login
-  const logout = useCallback(() => clearSession(null), [clearSession]);
+  //
+  // ออกจาก SchoolOS ด้วย ไม่งั้นกดออกแล้ว silent SSO ที่หน้า login จะพากลับเข้ามาเอง
+  // (cookie ยังอยู่) — เครื่องส่วนกลางจะกลายเป็นล็อกเอาต์ไม่ได้จริง
+  // ไม่ await: ล้าง state ฝั่งเราต้องเกิดทันที ไม่ควรค้างรอเครือข่าย
+  const logout = useCallback(() => {
+    blockSilentLogin();
+    logoutFromSchoolOS();
+    clearSession(null);
+  }, [clearSession]);
 
   // ── ให้ axios interceptor เรียกได้ตอน server ตอบ 401 ───────────────────────
   useEffect(() => {

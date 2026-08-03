@@ -28,8 +28,10 @@ api.interceptors.response.use(
   (err) => {
     const status = err.response?.status;
     const url = err.config?.url || '';
-    // ยกเว้นหน้า login เอง — 401 ตรงนั้นแปลว่ากรอกรหัสผิด ไม่ใช่ session หมดอายุ
-    const isLoginRequest = /\/login$/.test(url);
+    // ยกเว้นตอนกำลังเข้าสู่ระบบเอง — 401 ตรงนั้นแปลว่ากรอกรหัสผิด (หรือโค้ด SSO
+    // หมดอายุ) ไม่ใช่ session หมดอายุ ถ้าไม่กันไว้หน้า login จะขึ้นข้อความ
+    // "เซสชันหมดอายุ" ให้คนที่เพิ่งเปิดหน้าเว็บมาเฉย ๆ
+    const isLoginRequest = /\/(login|auth\/sso)$/.test(url);
 
     if (status === 401 && !isLoginRequest) {
       notifySessionExpired(LOGOUT_REASONS.EXPIRED);

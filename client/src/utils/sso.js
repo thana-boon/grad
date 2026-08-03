@@ -1,0 +1,117 @@
+// ─── Silent SSO — เข้าระบบต่อจาก SchoolOS โดยไม่ต้องกรอกรหัสซ้ำ ───────────────
+//
+// ลำดับที่หน้า login ทำตอนเปิด:
+//   1. ถามค่าคอนฟิกจาก server ของเรา (ที่อยู่ SchoolOS + ชื่อ audience)
+//   2. ขอ "โค้ดใช้ครั้งเดียว" จาก SchoolOS ด้วย cookie ของผู้ใช้เอง
+//      · ยังไม่ได้ล็อกอิน → ตอบ 200 พร้อม valid:false (ไม่ใช่ error) → แสดงฟอร์มตามปกติ
+//   3. ส่งโค้ดให้ server ของเราไปแลกเป็นตัวตนด้วย API key แล้วออก token ของ GradTrack
+//
+// กติกาที่ห้ามพลาด:
+//   · โค้ดคือ credential ชั่วคราว — ห้ามเก็บลง localStorage / ห้ามใส่ใน URL / ห้าม log
+//   · ใช้ได้ครั้งเดียว ยิงซ้ำด้วยโค้ดเดิมจะได้ used_code → ต้องขอใหม่เสมอ
+//   · ล้มเหลวเมื่อไหร่ก็แค่ "แสดงหน้า login ตามปกติ" ห้ามทำให้หน้าเว็บค้างหรือพัง
+import api from './api';
+
+// เพดานรอคำตอบจาก SchoolOS — เกินกว่านี้ให้ไปแสดงฟอร์มเลย ดีกว่าปล่อยจอค้าง
+const PROBE_TIMEOUT_MS = 6000;
+
+// ─── ปิด silent SSO ชั่วคราว ─────────────────────────────────────────────────
+// ใช้ตอนกด "ออกจากระบบ": คำขอ logout ไปที่ SchoolOS เป็น async แต่หน้า login
+// ถูก render ทันที ถ้าไม่กันไว้ probe อาจวิ่งชนะแล้วดึงผู้ใช้กลับเข้าระบบเอง
+//
+// ตั้งเวลาสั้น ๆ พอกันจังหวะนั้น ไม่ได้ปิดถาวร — พอ session ของ SchoolOS ถูกลบจริง
+// probe ก็จะได้ valid:false เองอยู่แล้ว และถ้าผู้ใช้ไปล็อกอิน SchoolOS ใหม่
+// ก็ควรกลับมาเข้า GradTrack ได้เลยโดยไม่ต้องรอ
+const BLOCK_KEY = 'ssoBlockUntil';
+const BLOCK_MS = 30 * 1000;
+
+export function blockSilentLogin(ms = BLOCK_MS) {
+  localStorage.setItem(BLOCK_KEY, String(Date.now() + ms));
+}
+
+export function clearSilentLoginBlock() {
+  localStorage.removeItem(BLOCK_KEY);
+}
+
+export function isSilentLoginBlocked() {
+  const until = Number(localStorage.getItem(BLOCK_KEY));
+  return Number.isFinite(until) && until > 0 && Date.now() < until;
+}
+
+// ─── คอนฟิก (จาก server ของเรา) ──────────────────────────────────────────────
+// อ่านครั้งเดียวต่อการโหลดหน้า — ค่าไม่เปลี่ยนระหว่างใช้งาน
+let configPromise = null;
+
+function loadConfig() {
+  if (!configPromise) {
+    configPromise = api
+      .get('/auth/sso/config')
+      .then((res) => res.data)
+      // server ตอบไม่ได้ = ถือว่าไม่มี SSO ไปหน้า login ปกติ
+      .catch(() => ({ enabled: false }));
+  }
+  return configPromise;
+}
+
+/** ต่อ base ของ SchoolOS เข้ากับ path — base เป็น path ล้วน ("/users") หรือ URL เต็มก็ได้ */
+const usersUrl = (base, path) => `${base || ''}${path}`;
+
+/**
+ * ขอโค้ด handoff — คืน null เมื่อ "ยังไม่ได้ล็อกอิน SchoolOS" หรือขอไม่สำเร็จ
+ * ทั้งสองกรณีจบเหมือนกันคือให้ผู้ใช้กรอกรหัสเอง จึงไม่ต้องแยก
+ */
+async function getHandoffCode({ usersBase, audience }) {
+  try {
+    const res = await fetch(
+      usersUrl(usersBase, `/api/auth/handoff?audience=${encodeURIComponent(audience)}`),
+      {
+        credentials: 'include', // ขาดบรรทัดนี้ = ได้ valid:false ตลอด (cookie ไม่ถูกส่ง)
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      }
+    );
+    if (!res.ok) return null; // 400/403/429 = ตั้งค่าไม่ครบหรือขอถี่ไป → ไปหน้า login
+    const data = await res.json();
+    return data?.valid ? data.code : null;
+  } catch {
+    // ต่อไม่ได้ / หมดเวลา / ตอบไม่ใช่ JSON (เช่นตอน dev ที่ยังไม่ได้ชี้ base มาที่ SchoolOS)
+    return null;
+  }
+}
+
+/**
+ * ลองเข้าระบบเงียบ ๆ
+ * @returns { token, user } เมื่อสำเร็จ · null เมื่อยังไม่ได้ล็อกอิน SchoolOS หรือ SSO ปิดอยู่
+ * @throws  error ของ axios เมื่อ server ปฏิเสธแบบมีเหตุผล (403 = ไม่มีสิทธิ์เข้าระบบนี้)
+ */
+export async function trySilentLogin() {
+  const config = await loadConfig();
+  if (!config?.enabled) return null;
+
+  const code = await getHandoffCode(config);
+  if (!code) return null;
+
+  const res = await api.post('/auth/sso', { code });
+  return res.data;
+}
+
+/**
+ * ออกจากระบบที่ SchoolOS ด้วย — ล้างแค่ฝั่งเราไม่พอ
+ * ถ้าไม่เรียก cookie ยังอยู่ พอกลับมาหน้า login รอบหน้า probe จะพากลับเข้าระบบเอง
+ * ซึ่งอันตรายมากกับเครื่องที่ใช้ร่วมกัน (ห้องคอม / ห้องพักครู)
+ *
+ * ไม่เคยโยน error: ล้าง session ฝั่งเราต้องสำเร็จเสมอ ต่อให้ SchoolOS ไม่ตอบ
+ */
+export async function logoutFromSchoolOS() {
+  try {
+    const config = await loadConfig();
+    if (!config?.enabled) return;
+    await fetch(usersUrl(config.usersBase, '/api/auth/logout'), {
+      method: 'POST',
+      credentials: 'include',
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+  } catch {
+    /* ปล่อยผ่าน — ฝั่งเราออกจากระบบไปแล้ว */
+  }
+}

@@ -54,6 +54,17 @@ fetch(base + '/api/public/v1/me', {
         console.error('    ❌ key ขาด scope: ' + missing.join(', '));
         process.exit(1);
       }
+      // silent SSO ขาดอะไรไปก็แค่ 'ไม่ทำงาน' (ตกไปที่หน้า login ตามปกติ)
+      // จึงเตือนอย่างเดียว ไม่ล้ม — แต่ต้องเตือนให้เห็น ไม่งั้นจะนั่งงงว่าทำไมไม่เข้าเอง
+      if (process.env.SSO_SILENT_LOGIN !== '0') {
+        const audience = process.env.SCHOOLOS_HANDOFF_AUDIENCE || 'grad';
+        if (!(d.scopes || []).includes('auth:handoff')) {
+          console.warn('    ⚠️  silent SSO เปิดอยู่ แต่ key ไม่มี scope auth:handoff — จะไม่ทำงาน');
+        } else if (d.handoffAudience !== audience) {
+          console.warn('    ⚠️  silent SSO: audience ของ key = ' + (d.handoffAudience || '(ยังไม่ตั้ง)') +
+            ' แต่ SCHOOLOS_HANDOFF_AUDIENCE = ' + audience + ' — ต้องตรงกัน');
+        }
+      }
       process.exit(0);
     }
     const code = await res.json().then((d) => d?.error?.code).catch(() => undefined);

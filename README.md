@@ -57,6 +57,42 @@
 ทางเดิม `Skdw` + เลขบัตรประชาชน ยังเปิดอยู่ (`STUDENT_LEGACY_LOGIN=1`) เพื่อไม่ให้เด็กเข้าไม่ได้ในวันแรก
 เมื่อย้ายกันครบแล้วให้ตั้ง `STUDENT_LEGACY_LOGIN=0` — รหัสผ่านที่เดาได้จากเลขบัตรประชาชนไม่ปลอดภัย
 
+### 🔁 Silent SSO — ล็อกอิน SchoolOS ไว้แล้วเข้าได้เลย
+
+เปิด `schoolos.sukhon.ac.th/grad` ขณะที่ยังล็อกอิน SchoolOS อยู่ → **เข้าระบบเลย ไม่เห็นหน้า login**
+ถ้ายังไม่ได้ล็อกอิน (หรือ SchoolOS ไม่ตอบ) ก็เห็นฟอร์มตามปกติ ใช้ได้ทั้งครูและนักเรียน
+
+```
+เบราว์เซอร์                         GradTrack (server)            SchoolOS Users
+   ├─ GET /users/api/auth/handoff?audience=grad ─────────────────▶ code (60 วิ ครั้งเดียว)
+   ├─ POST /grad/api/auth/sso {code} ─▶
+   │                                  ├─ POST /auth/handoff/redeem ─▶ ตัวตนผู้ใช้
+   │                                  ├─ ตรวจรายชื่อครู / รุ่นนักเรียน แล้วออก JWT ของเรา
+   │◀─────────────────────────────────┤
+```
+
+- **API key ไม่เคยออกจาก server** — เบราว์เซอร์ถือแค่โค้ดที่อายุ 60 วินาที ใช้ได้ครั้งเดียว
+  และไร้ค่าถ้าไม่มี key ของ GradTrack คู่กัน (cookie ของ SchoolOS เป็น HttpOnly หน้าเว็บอ่านไม่ได้)
+- **ด่านเดิมยังอยู่ครบ** — ตัวตนที่ได้จาก SSO ไม่มี `active`/`status` และไม่บอกว่าเป็น `teacher-admin`
+  (API.md §4.11) ระบบจึงอ่านทะเบียนครู/นักเรียนเองทุกครั้ง แล้วผ่านรายชื่อ `staff_access` และ
+  เกณฑ์ "รุ่นที่เพิ่งจบ" ชุดเดียวกับการล็อกอินด้วยรหัสผ่าน — เข้าทาง SSO ไม่ได้สิทธิ์พิเศษกว่า
+- อายุ token ที่ออกให้ถูกตัดไม่ให้เกิน session ของ SchoolOS ที่เหลืออยู่
+- **ไม่**ดึงกลับเข้าระบบอัตโนมัติหลังถูกเตะออกเพราะหมดเวลา (idle/token หมดอายุ) — ต้องกรอกเอง
+  ไม่งั้น idle timeout จะไม่มีความหมาย และผู้ใช้จะไม่ทันเห็นว่าโดนเตะออกเพราะอะไร
+- **กด "ออกจากระบบ" = ออกจาก SchoolOS ทั้งแพลตฟอร์มด้วย** จงใจให้เป็นแบบนี้ ถ้าล้างแค่ฝั่ง
+  GradTrack cookie ของ SchoolOS จะยังอยู่ แล้วรอบถัดไป SSO ก็พากลับเข้ามาเอง = ล็อกเอาต์ไม่ได้จริง
+  บนเครื่องส่วนกลาง
+
+**สิ่งที่ต้องให้ผู้ดูแล SchoolOS ตั้งให้ (ตั้งครบแล้วทั้งคู่)** — ขาดข้อไหนก็แค่ SSO ไม่ทำงาน ระบบไม่พัง
+
+1. API key ของ GradTrack ต้องมี scope `auth:handoff` **และ** ช่อง "ระบบปลายทาง (audience)" = `grad`
+2. `https://schoolos.sukhon.ac.th` อยู่ใน `SSO_ALLOWED_ORIGINS` ของ Users (ต้องตรงเป๊ะ ห้ามมี `/` ปิดท้าย)
+
+ตรวจเองได้ที่ `curl -H "X-API-Key: sk_live_…" <base>/api/public/v1/me` → ต้องเห็น `auth:handoff`
+ใน `scopes` และ `"handoffAudience": "grad"` · ตอนคอนเทนเนอร์สตาร์ทก็เตือนให้ถ้าตั้งไม่ครบ
+
+ปิดฟีเจอร์นี้ได้ด้วย `SSO_SILENT_LOGIN=0` (ทุกคนกลับไปกรอกรหัสเองเหมือนเดิม)
+
 ---
 
 ## 🚀 รันในเครื่อง (Docker)
@@ -258,7 +294,8 @@ docker cp ./backup.tar.gz gradtrack-app:/app/server/backups/   # ใส่กล
 ```
 grad/
 ├── client/                    # React + Vite
-│   └── src/utils/withBase.js  # ตัวเดียวที่ประกอบ path ฝั่ง client
+│   ├── src/utils/withBase.js  # ตัวเดียวที่ประกอบ path ฝั่ง client
+│   └── src/utils/sso.js       # silent SSO ฝั่งเบราว์เซอร์ (ขอโค้ด + ออกจาก SchoolOS)
 ├── server/
 │   ├── config/
 │   │   ├── env.js             # โหลด .env ที่เดียว (ทุก entry point ต้อง require)
@@ -266,6 +303,7 @@ grad/
 │   │   ├── jwt.js             # เซ็น token ที่เดียว (อายุจาก JWT_EXPIRES_IN)
 │   │   └── schoolos.js        # SchoolOS Public API client + map เป็น snake_case
 │   ├── routes/staff.js        # รายชื่อครูที่เข้าได้ + resolveAccess() ที่ login เรียกใช้
+│   ├── routes/sso.js          # silent SSO — แลกโค้ด handoff เป็น session ของเรา
 │   ├── routes/backups.js      # สำรอง/ดาวน์โหลด/อัปโหลด/กู้คืน (admin เท่านั้น)
 │   ├── services/backup.js     # ตัวสร้าง/กู้คืนไฟล์สำรอง (ข้อมูลทุกตาราง + uploads)
 │   ├── services/tar.js        # เขียน/อ่าน .tar.gz เอง — ไม่มี dependency เพิ่ม

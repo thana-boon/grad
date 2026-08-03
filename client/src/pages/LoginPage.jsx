@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Icon from '../components/ui/Icon';
 import { LOGOUT_REASONS, getLogoutReason } from '../utils/session';
+import { isSilentLoginBlocked, trySilentLogin } from '../utils/sso';
 
 // ข้อความตอนถูกเตะออก — ต้องบอกให้ชัดว่าไม่ได้ล็อกอินหลุดเพราะระบบพัง
 const TIMEOUT_NOTICES = {
@@ -25,6 +26,44 @@ export default function LoginPage() {
   // ว่าไม่ได้เด้งออกเพราะระบบพัง (ค่าถูกล้างตอนล็อกอินสำเร็จ/กดออกเอง ไม่ใช่ตอนอ่าน)
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const notice = noticeDismissed ? '' : TIMEOUT_NOTICES[getLogoutReason()] || '';
+
+  // ── silent SSO: ล็อกอิน SchoolOS ไว้แล้วก็เข้าได้เลย ─────────────────────────
+  //
+  // ข้ามเมื่อ:
+  //   · เพิ่งถูกเตะออกเพราะหมดเวลา — ต้องกรอกเองใหม่ ไม่งั้น idle timeout ไร้ความหมาย
+  //     และผู้ใช้จะไม่ทันเห็นด้วยซ้ำว่าโดนเตะออกเพราะอะไร
+  //   · เพิ่งกดออกจากระบบ (ดู blockSilentLogin ใน utils/sso.js)
+  const [checkingSso, setCheckingSso] = useState(
+    () => !getLogoutReason() && !isSilentLoginBlocked()
+  );
+  // StrictMode ตอน dev เรียก effect สองรอบ — กันไม่ให้ขอโค้ด handoff ซ้ำโดยเปล่าประโยชน์
+  const ssoStarted = useRef(false);
+
+  useEffect(() => {
+    if (!checkingSso || ssoStarted.current) return;
+    ssoStarted.current = true;
+
+    let alive = true;
+    (async () => {
+      try {
+        const data = await trySilentLogin();
+        if (data?.token) {
+          login(data.user, data.token);
+          navigate(data.user.role === 'student' ? '/student' : '/dashboard', { replace: true });
+          return; // ออกจากหน้านี้แล้ว ไม่ต้องปิดสถานะกำลังตรวจสอบ
+        }
+      } catch (err) {
+        // 403 = ล็อกอิน SchoolOS อยู่จริงแต่ไม่มีสิทธิ์ใช้ GradTrack (ไม่อยู่ในรายชื่อ /
+        // รุ่นปิดไปแล้ว) — ต้องบอกเหตุผล ไม่งั้นผู้ใช้จะกรอกรหัสซ้ำอยู่นั่นแล้วงงว่าทำไมไม่เข้า
+        if (alive && err.response?.status === 403) {
+          setError(err.response.data?.message || 'บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าใช้ระบบ');
+        }
+      }
+      if (alive) setCheckingSso(false);
+    })();
+
+    return () => { alive = false; };
+  }, [checkingSso, login, navigate]);
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -151,115 +190,131 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <h2 className="text-2xl font-semibold tracking-tight">เข้าสู่ระบบ</h2>
-          <p className="mt-1.5 text-sm text-base-content/55">
-            ใช้บัญชีครู/ผู้ดูแล หรือรหัสนักเรียนของโรงเรียน
-          </p>
-
-          {notice && (
-            <div role="status" className="alert alert-warning anim-scale-in mt-5 py-2.5">
-              <Icon name="clock" size={17} className="mt-px" />
-              <span className="text-sm">{notice}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4" noValidate>
-            <div>
-              <label htmlFor="username" className="label">
-                ชื่อผู้ใช้ / รหัสนักเรียน
-              </label>
-              <div className="relative">
-                <Icon
-                  name="user"
-                  size={17}
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base-content/40"
-                />
-                <input
-                  id="username"
-                  type="text"
-                  name="username"
-                  value={form.username}
-                  onChange={handleChange}
-                  placeholder="เช่น teacher01 หรือ 12345"
-                  required
-                  autoComplete="username"
-                  autoCapitalize="none"
-                  spellCheck="false"
-                  className="input h-11 w-full pl-11"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="password" className="label">
-                รหัสผ่าน
-              </label>
-              <div className="relative">
-                <Icon
-                  name="lock"
-                  size={17}
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base-content/40"
-                />
-                <input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="กรอกรหัสผ่าน"
-                  required
-                  autoComplete="current-password"
-                  className="input h-11 w-full pl-11 pr-11"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((s) => !s)}
-                  className="absolute right-1.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-base-content/50 transition-colors hover:bg-secondary hover:text-primary"
-                  aria-label={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
-                >
-                  <Icon name={showPassword ? 'eyeOff' : 'eye'} size={17} />
-                </button>
-              </div>
-            </div>
-
-            {/* ข้อความผิดพลาด — ประกาศให้ screen reader ด้วย */}
-            <div aria-live="polite">
-              {error && (
-                <div role="alert" className="alert alert-error anim-scale-in py-2.5">
-                  <Icon name="alert" size={17} className="mt-px" />
-                  <span className="text-sm">{error}</span>
-                </div>
-              )}
-
-              {countdown > 0 && (
-                <div role="alert" className="alert alert-warning anim-scale-in py-2.5">
-                  <Icon name="clock" size={17} className="mt-px" />
-                  <span className="text-sm">
-                    พยายามเข้าสู่ระบบผิดหลายครั้ง — ลองใหม่ได้ในอีก{' '}
-                    <span className="font-semibold tabular-nums">{mmss}</span> นาที
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || countdown > 0}
-              className="btn btn-primary mt-1 h-11 w-full"
+          {/* กำลังถาม SchoolOS ว่าล็อกอินอยู่แล้วหรือยัง — ยังไม่ต้องโชว์ฟอร์ม
+              ไม่งั้นคนที่ล็อกอินอยู่แล้วจะเห็นฟอร์มแวบหนึ่งก่อนถูกพาเข้าระบบ */}
+          {checkingSso ? (
+            <div
+              role="status"
+              className="flex flex-col items-center gap-4 py-20 text-center anim-fade-up"
             >
-              {loading && <span className="loading loading-spinner loading-xs" />}
-              {countdown > 0
-                ? `รอ ${mmss} นาที`
-                : loading
-                  ? 'กำลังเข้าสู่ระบบ...'
-                  : 'เข้าสู่ระบบ'}
-              {!loading && countdown === 0 && <Icon name="arrowRight" size={17} />}
-            </button>
-          </form>
+              <span className="loading loading-spinner loading-lg text-primary" />
+              <p className="text-sm text-base-content/55">
+                กำลังตรวจสอบการเข้าสู่ระบบจาก SchoolOS…
+              </p>
+            </div>
+          ) : (
+          <>
+            <h2 className="text-2xl font-semibold tracking-tight">เข้าสู่ระบบ</h2>
+            <p className="mt-1.5 text-sm text-base-content/55">
+              ใช้บัญชีครู/ผู้ดูแล หรือรหัสนักเรียนของโรงเรียน
+            </p>
 
-          <p className="mt-8 text-center text-xs text-base-content/45">
-            ลืมรหัสผ่าน? ติดต่อฝ่ายทะเบียนหรือครูที่ปรึกษาของห้อง
-          </p>
+            {notice && (
+              <div role="status" className="alert alert-warning anim-scale-in mt-5 py-2.5">
+                <Icon name="clock" size={17} className="mt-px" />
+                <span className="text-sm">{notice}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="mt-7 flex flex-col gap-4" noValidate>
+              <div>
+                <label htmlFor="username" className="label">
+                  ชื่อผู้ใช้ / รหัสนักเรียน
+                </label>
+                <div className="relative">
+                  <Icon
+                    name="user"
+                    size={17}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base-content/40"
+                  />
+                  <input
+                    id="username"
+                    type="text"
+                    name="username"
+                    value={form.username}
+                    onChange={handleChange}
+                    placeholder="เช่น teacher01 หรือ 12345"
+                    required
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    spellCheck="false"
+                    className="input h-11 w-full pl-11"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="password" className="label">
+                  รหัสผ่าน
+                </label>
+                <div className="relative">
+                  <Icon
+                    name="lock"
+                    size={17}
+                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-base-content/40"
+                  />
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    name="password"
+                    value={form.password}
+                    onChange={handleChange}
+                    placeholder="กรอกรหัสผ่าน"
+                    required
+                    autoComplete="current-password"
+                    className="input h-11 w-full pl-11 pr-11"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((s) => !s)}
+                    className="absolute right-1.5 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-base-content/50 transition-colors hover:bg-secondary hover:text-primary"
+                    aria-label={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+                  >
+                    <Icon name={showPassword ? 'eyeOff' : 'eye'} size={17} />
+                  </button>
+                </div>
+              </div>
+
+              {/* ข้อความผิดพลาด — ประกาศให้ screen reader ด้วย */}
+              <div aria-live="polite">
+                {error && (
+                  <div role="alert" className="alert alert-error anim-scale-in py-2.5">
+                    <Icon name="alert" size={17} className="mt-px" />
+                    <span className="text-sm">{error}</span>
+                  </div>
+                )}
+
+                {countdown > 0 && (
+                  <div role="alert" className="alert alert-warning anim-scale-in py-2.5">
+                    <Icon name="clock" size={17} className="mt-px" />
+                    <span className="text-sm">
+                      พยายามเข้าสู่ระบบผิดหลายครั้ง — ลองใหม่ได้ในอีก{' '}
+                      <span className="font-semibold tabular-nums">{mmss}</span> นาที
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading || countdown > 0}
+                className="btn btn-primary mt-1 h-11 w-full"
+              >
+                {loading && <span className="loading loading-spinner loading-xs" />}
+                {countdown > 0
+                  ? `รอ ${mmss} นาที`
+                  : loading
+                    ? 'กำลังเข้าสู่ระบบ...'
+                    : 'เข้าสู่ระบบ'}
+                {!loading && countdown === 0 && <Icon name="arrowRight" size={17} />}
+              </button>
+            </form>
+
+            <p className="mt-8 text-center text-xs text-base-content/45">
+              ลืมรหัสผ่าน? ติดต่อฝ่ายทะเบียนหรือครูที่ปรึกษาของห้อง
+            </p>
+          </>
+          )}
         </div>
       </div>
     </div>

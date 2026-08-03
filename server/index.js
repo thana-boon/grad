@@ -73,6 +73,8 @@ const UPLOAD_DIR = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 router.use('/uploads', express.static(UPLOAD_DIR));
 
+// ต้องมาก่อน /api/auth — express เดินตามลำดับที่ mount
+router.use('/api/auth/sso', require('./routes/sso'));
 router.use('/api/auth', require('./routes/auth'));
 router.use('/api/users', require('./routes/users'));
 router.use('/api/staff', require('./routes/staff'));
