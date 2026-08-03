@@ -1,7 +1,7 @@
 // ─── นโยบายหมดเวลาใช้งาน (ฝั่ง client) ──────────────────────────────────────
 //
 // มีสองชั้นซ้อนกัน:
-//   1. ไม่ขยับ 30 นาที → หลุด            ← ไฟล์นี้
+//   1. ไม่ขยับ 15 นาที → หลุด            ← ไฟล์นี้
 //   2. token หมดอายุตามจริง (JWT_EXPIRES_IN ฝั่ง server, ค่าเริ่มต้น 8h) → หลุด
 //
 // ⚠️  ชั้นที่ 1 เป็นแค่ "ล็อกหน้าจอที่เปิดค้างไว้" ไม่ใช่มาตรการความปลอดภัย —
@@ -12,7 +12,14 @@
 //   · reload หน้าแล้วนาฬิกาไม่รีเซ็ต (ไม่งั้นเปิดค้างข้ามคืนแล้ว F5 ก็ยังอยู่)
 //   · ขยับในแท็บหนึ่ง = แท็บอื่นไม่หลุดตาม (ครูเปิดหลายแท็บพร้อมกันเป็นเรื่องปกติ)
 
-export const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 นาที
+// ตั้งเป็นนาทีไว้ตัวเดียว แล้วให้ข้อความที่หน้า login อ้างอิงค่านี้ — เคยมีปัญหา
+// แก้ตัวเลขที่นี่แล้วลืมแก้ข้อความ ผู้ใช้เลยอ่านเจอเวลาที่ไม่ตรงกับของจริง
+//
+// ต้องไม่ยาวกว่า idle window ของ SchoolOS (SESSION_IDLE_MINUTES) ไม่งั้นจะเจอ
+// สภาพ "ยังอยู่ใน GradTrack แต่ SchoolOS ตายไปแล้ว" แล้วต้องกรอกรหัสใหม่ทั้งที่
+// เพิ่งใช้งานอยู่แท้ ๆ
+export const IDLE_TIMEOUT_MINUTES = 15;
+export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60 * 1000;
 
 // เขียน lastActivity ถี่สุดทุก ๆ เท่านี้ — กัน mousemove ยิง localStorage รัวๆ
 const ACTIVITY_WRITE_INTERVAL_MS = 30 * 1000;
@@ -44,6 +51,16 @@ export function markActivity({ force = false } = {}) {
 export function clearActivity() {
   lastWrite = 0;
   localStorage.removeItem(LAST_ACTIVITY_KEY);
+}
+
+/**
+ * ผ่านมากี่ ms ตั้งแต่ผู้ใช้ขยับล่าสุด · Infinity = ยังไม่เคยบันทึก
+ * ใช้ตัดสินว่า "ยังทำงานอยู่จริง" ก่อนไปต่ออายุ session ของ SchoolOS ให้
+ */
+export function msSinceActivity() {
+  const last = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
+  if (!Number.isFinite(last) || last <= 0) return Infinity;
+  return Date.now() - last;
 }
 
 export function isIdleExpired() {

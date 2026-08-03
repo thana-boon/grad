@@ -8,6 +8,7 @@ import {
   isIdleExpired,
   isTokenExpired,
   markActivity,
+  msSinceActivity,
   setLogoutReason,
   setSessionExpiredHandler,
 } from '../utils/session';
@@ -26,7 +27,7 @@ const AuthContext = createContext(null);
 const CHECK_INTERVAL_MS = 15 * 1000;
 
 // รอบต่ออายุ session ฝั่ง SchoolOS ระหว่างที่ยังนั่งใช้งาน GradTrack อยู่
-// ต้องถี่กว่า idle window ของ SchoolOS (30 นาที) พอสมควร ไม่งั้นต่อไม่ทัน
+// ต้องถี่กว่า idle window ของ SchoolOS (SESSION_IDLE_MINUTES) พอสมควร ไม่งั้นต่อไม่ทัน
 const SOS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
 // เหตุการณ์ที่นับว่า "ยังใช้งานอยู่" — ต้องเป็นการกระทำจริงของผู้ใช้
@@ -44,7 +45,7 @@ const readStoredUser = () => {
   }
 };
 
-// เคลียร์ session ตอนเปิดแอป: token หมดอายุ หรือทิ้งไว้ไม่ได้แตะเกิน 30 นาที
+// เคลียร์ session ตอนเปิดแอป: token หมดอายุ หรือทิ้งไว้ไม่ได้แตะเกิน IDLE_TIMEOUT_MS
 // ทำนอก component เพราะ useState initializer ต้องได้ผลลัพธ์ที่นิ่งแล้ว
 function loadSession() {
   const token = localStorage.getItem(TOKEN_KEY);
@@ -139,11 +140,14 @@ export function AuthProvider({ children }) {
 
     const timer = setInterval(check, CHECK_INTERVAL_MS);
 
-    // ต่ออายุ session ของ SchoolOS ตามการใช้งานจริงในระบบนี้ — ต่อเฉพาะตอนที่
-    // ผู้ใช้ยังอยู่จริง (check() ผ่าน) ไม่ใช่ต่อให้แท็บที่เปิดค้างไว้เฉย ๆ
-    // ซึ่งจะทำให้ session ของทั้งแพลตฟอร์มไม่มีวันหมดอายุ
+    // ต่ออายุ session ของ SchoolOS ตามการใช้งานจริงในระบบนี้
+    //
+    // เงื่อนไขต้องครบสองข้อ: session ยังไม่หมดอายุ (check) **และ** ผู้ใช้เพิ่งขยับจริง
+    // ภายในรอบที่ผ่านมา — ถ้าดูแค่ check() แท็บที่เปิดค้างไว้เฉย ๆ จะได้รับการต่ออายุ
+    // ไปเรื่อย ๆ จนกว่าจะโดนเตะ กลายเป็นยืด session ของทั้งแพลตฟอร์มให้คนที่ลุกจาก
+    // เครื่องไปแล้ว ซึ่งสวนทางกับเหตุผลที่ลด idle timeout ลงมาตั้งแต่แรก
     const sosTimer = setInterval(() => {
-      if (check()) refreshSchoolOSSession();
+      if (check() && msSinceActivity() < SOS_REFRESH_INTERVAL_MS) refreshSchoolOSSession();
     }, SOS_REFRESH_INTERVAL_MS);
 
     // กลับมาที่แท็บ/ปลุกเครื่องจาก sleep → ตรวจทันที ไม่ต้องรอครบรอบ

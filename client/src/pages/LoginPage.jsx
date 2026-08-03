@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import Icon from '../components/ui/Icon';
-import { LOGOUT_REASONS, getLogoutReason, wasRecentlyLoggedOut } from '../utils/session';
+import {
+  IDLE_TIMEOUT_MINUTES,
+  LOGOUT_REASONS,
+  getLogoutReason,
+  wasRecentlyLoggedOut,
+} from '../utils/session';
 import { isSilentLoginBlocked, trySilentLogin } from '../utils/sso';
 
 // เว้นระยะระหว่างการลอง SSO ซ้ำตอนกลับมาที่แท็บ — สลับแท็บไปมาเป็นสิบครั้งต่อนาที
@@ -12,7 +17,7 @@ const SSO_RETRY_GAP_MS = 15 * 1000;
 
 // ข้อความตอนถูกเตะออก — ต้องบอกให้ชัดว่าไม่ได้ล็อกอินหลุดเพราะระบบพัง
 const TIMEOUT_NOTICES = {
-  [LOGOUT_REASONS.IDLE]: 'ไม่ได้ใช้งานนานเกิน 30 นาที ระบบออกจากระบบให้อัตโนมัติ กรุณาเข้าสู่ระบบใหม่',
+  [LOGOUT_REASONS.IDLE]: `ไม่ได้ใช้งานนานเกิน ${IDLE_TIMEOUT_MINUTES} นาที ระบบออกจากระบบให้อัตโนมัติ กรุณาเข้าสู่ระบบใหม่`,
   [LOGOUT_REASONS.EXPIRED]: 'เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่',
 };
 

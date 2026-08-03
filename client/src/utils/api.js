@@ -36,7 +36,7 @@ api.interceptors.response.use(
     // ไม่มี token เหลืออยู่แล้ว = เพิ่งกดออกจากระบบ (หรือถูกเคลียร์ไปก่อนหน้านี้)
     // 401 ที่ตามมาทีหลังจาก request ที่ค้างอยู่จึงไม่ได้บอกอะไรใหม่ — ถ้าปล่อยให้
     // ตั้งธง "เซสชันหมดอายุ" หน้า login จะขึ้นข้อความผิดบริบททั้งที่ผู้ใช้กดออกเอง
-    // และ silent SSO จะถูกกันไว้อีก 30 นาที (ดู wasRecentlyLoggedOut)
+    // และ silent SSO จะถูกกันไว้อีกหนึ่งช่วง idle timeout (ดู wasRecentlyLoggedOut)
     const hadSession = !!localStorage.getItem(TOKEN_KEY);
 
     if (status === 401 && !isLoginRequest && hadSession) {
