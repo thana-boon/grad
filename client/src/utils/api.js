@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { withBase } from './withBase';
-import { LOGOUT_REASONS, markActivity, notifySessionExpired } from './session';
+import { LOGOUT_REASONS, TOKEN_KEY, markActivity, notifySessionExpired } from './session';
 
 // prod: client กับ server เป็นโปรเซสเดียวกันและอยู่ใต้ base เดียวกัน (same-origin เสมอ)
 // → baseURL คือ "<base>api" เช่น /grad/api ซึ่ง withBase() ประกอบให้ตาม BASE_PATH ตอน build
@@ -11,7 +11,7 @@ const api = axios.create({
 
 // แนบ JWT token อัตโนมัติทุก request
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
     // ยิง request = ยังใช้งานอยู่ (เช่นหน้าที่ auto-refresh ข้อมูลเป็นระยะ
@@ -33,7 +33,13 @@ api.interceptors.response.use(
     // "เซสชันหมดอายุ" ให้คนที่เพิ่งเปิดหน้าเว็บมาเฉย ๆ
     const isLoginRequest = /\/(login|auth\/sso)$/.test(url);
 
-    if (status === 401 && !isLoginRequest) {
+    // ไม่มี token เหลืออยู่แล้ว = เพิ่งกดออกจากระบบ (หรือถูกเคลียร์ไปก่อนหน้านี้)
+    // 401 ที่ตามมาทีหลังจาก request ที่ค้างอยู่จึงไม่ได้บอกอะไรใหม่ — ถ้าปล่อยให้
+    // ตั้งธง "เซสชันหมดอายุ" หน้า login จะขึ้นข้อความผิดบริบททั้งที่ผู้ใช้กดออกเอง
+    // และ silent SSO จะถูกกันไว้อีก 30 นาที (ดู wasRecentlyLoggedOut)
+    const hadSession = !!localStorage.getItem(TOKEN_KEY);
+
+    if (status === 401 && !isLoginRequest && hadSession) {
       notifySessionExpired(LOGOUT_REASONS.EXPIRED);
     }
     return Promise.reject(err);

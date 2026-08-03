@@ -6,6 +6,10 @@ import Icon from '../components/ui/Icon';
 import { LOGOUT_REASONS, getLogoutReason, wasRecentlyLoggedOut } from '../utils/session';
 import { isSilentLoginBlocked, trySilentLogin } from '../utils/sso';
 
+// เว้นระยะระหว่างการลอง SSO ซ้ำตอนกลับมาที่แท็บ — สลับแท็บไปมาเป็นสิบครั้งต่อนาที
+// เป็นเรื่องปกติ แต่ฝั่ง SchoolOS จำกัดการขอโค้ดไว้ 10 ครั้ง/นาที/session
+const SSO_RETRY_GAP_MS = 15 * 1000;
+
 // ข้อความตอนถูกเตะออก — ต้องบอกให้ชัดว่าไม่ได้ล็อกอินหลุดเพราะระบบพัง
 const TIMEOUT_NOTICES = {
   [LOGOUT_REASONS.IDLE]: 'ไม่ได้ใช้งานนานเกิน 30 นาที ระบบออกจากระบบให้อัตโนมัติ กรุณาเข้าสู่ระบบใหม่',
@@ -40,18 +44,37 @@ export default function LoginPage() {
   const [checkingSso, setCheckingSso] = useState(
     () => !wasRecentlyLoggedOut() && !isSilentLoginBlocked()
   );
-  // StrictMode ตอน dev เรียก effect สองรอบ — กันไม่ให้ขอโค้ด handoff ซ้ำโดยเปล่าประโยชน์
-  const ssoStarted = useRef(false);
+  const ssoBusy = useRef(false);    // กำลังลองอยู่ ห้ามยิงซ้อน
+  const ssoLastTry = useRef(0);     // กันยิงรัวตอนสลับแท็บถี่ ๆ
+  const mounted = useRef(true);
+  // ผู้ใช้เริ่มพิมพ์/กดเข้าสู่ระบบแล้ว = ตั้งใจใช้บัญชีที่กรอกเอง ห้าม SSO แย่งพาเข้า
+  const formTouched = useRef(false);
 
   useEffect(() => {
-    if (!checkingSso || ssoStarted.current) return;
-    ssoStarted.current = true;
+    formTouched.current = loading || form.username !== '' || form.password !== '';
+  });
 
-    let alive = true;
-    (async () => {
+  useEffect(() => {
+    mounted.current = true;
+
+    /**
+     * @param background true = ลองเงียบ ๆ โดยไม่ซ่อนฟอร์ม (ใช้ตอนกลับมาที่แท็บ)
+     *                   ไม่งั้นฟอร์มจะกระพริบหายทุกครั้งที่สลับแท็บ
+     */
+    const attempt = async (background) => {
+      if (ssoBusy.current) return;
+      // ธงกันอาจหมดอายุไปแล้วตั้งแต่ตอนเปิดหน้า จึงต้องอ่านใหม่ทุกครั้ง ไม่ใช้ค่าที่คิดไว้
+      if (wasRecentlyLoggedOut() || isSilentLoginBlocked()) return;
+      if (background) {
+        if (formTouched.current) return;
+        if (Date.now() - ssoLastTry.current < SSO_RETRY_GAP_MS) return;
+      }
+
+      ssoBusy.current = true;
+      ssoLastTry.current = Date.now();
       try {
         const data = await trySilentLogin();
-        if (data?.token) {
+        if (mounted.current && data?.token) {
           login(data.user, data.token);
           navigate(data.user.role === 'student' ? '/student' : '/dashboard', { replace: true });
           return; // ออกจากหน้านี้แล้ว ไม่ต้องปิดสถานะกำลังตรวจสอบ
@@ -59,14 +82,33 @@ export default function LoginPage() {
       } catch (err) {
         // 403 = ล็อกอิน SchoolOS อยู่จริงแต่ไม่มีสิทธิ์ใช้ GradTrack (ไม่อยู่ในรายชื่อ /
         // รุ่นปิดไปแล้ว) — ต้องบอกเหตุผล ไม่งั้นผู้ใช้จะกรอกรหัสซ้ำอยู่นั่นแล้วงงว่าทำไมไม่เข้า
-        if (alive && err.response?.status === 403) {
+        if (mounted.current && err.response?.status === 403) {
           setError(err.response.data?.message || 'บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าใช้ระบบ');
         }
+      } finally {
+        ssoBusy.current = false;
       }
-      if (alive) setCheckingSso(false);
-    })();
+      if (mounted.current) setCheckingSso(false);
+    };
 
-    return () => { alive = false; };
+    if (checkingSso) attempt(false);
+
+    // กลับมาที่แท็บ/หน้าต่างนี้อีกครั้ง → ลองใหม่
+    //
+    // เคสจริงที่เจอ: กดออกจากระบบ → SPA พามาหน้านี้ทันทีโดยไม่ได้โหลดหน้าใหม่
+    // (ตอนนั้นยังติดธงกัน 30 วินาทีอยู่) → ผู้ใช้สลับไปล็อกอิน SchoolOS อีกแท็บ
+    // → กลับมาแท็บนี้ซึ่ง mount ค้างอยู่ ถ้าไม่ลองใหม่ก็จะเห็นแต่ฟอร์มไปตลอดจนกว่าจะกด F5
+    const onWake = () => {
+      if (document.visibilityState === 'visible') attempt(true);
+    };
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+
+    return () => {
+      mounted.current = false;
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
   }, [checkingSso, login, navigate]);
 
   useEffect(() => {
