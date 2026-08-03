@@ -96,6 +96,32 @@ export async function trySilentLogin() {
 }
 
 /**
+ * พาออกไปหน้า portal ของ SchoolOS เมื่อ session ของเราจบ
+ *
+ * ⚠️ เรียกเฉพาะ "จังหวะที่ session เพิ่งจบ" เท่านั้น ห้ามเรียกตอน render หน้า login
+ * ไม่งั้นจะวนไม่รู้จบ: portal → กดเข้า GradTrack → หน้า login → เด้งกลับ portal → ...
+ * หน้า login ต้องยังเปิดดูได้เสมอ เพราะเป็นทางเข้าเดียวของบัญชี local ตอน SchoolOS ล่ม
+ *
+ * @param logoutFirst true = ออกจาก SchoolOS ระหว่างทางด้วย (ใช้ตอนกดปุ่มออกจากระบบ)
+ *   ทำในการ navigate ครั้งเดียวผ่าน ?next= เชื่อถือได้กว่ายิง POST ทิ้งไว้แล้วรีบเปลี่ยนหน้า
+ *   ซึ่งเบราว์เซอร์อาจตัดทิ้งกลางคันจนออกจากระบบไม่สำเร็จ
+ */
+export async function leaveToPortal({ logoutFirst = false } = {}) {
+  let target = '/';
+  try {
+    const config = await loadConfig();
+    const portal = config?.portalUrl || '/';
+    target =
+      logoutFirst && config?.enabled
+        ? usersUrl(config.usersBase, `/api/auth/logout?next=${encodeURIComponent(portal)}`)
+        : portal;
+  } catch {
+    /* อ่านค่าไม่ได้ → กลับหน้าแรกของโดเมนนี้ ดีกว่าค้างอยู่เฉย ๆ */
+  }
+  window.location.assign(target);
+}
+
+/**
  * ต่ออายุ session ของ SchoolOS
  *
  * จำเป็นเพราะ SchoolOS **ไม่นับ** การใช้งานในระบบเราเป็น activity ของ session
@@ -121,23 +147,6 @@ export async function refreshSchoolOSSession() {
   }
 }
 
-/**
- * ออกจากระบบที่ SchoolOS ด้วย — ล้างแค่ฝั่งเราไม่พอ
- * ถ้าไม่เรียก cookie ยังอยู่ พอกลับมาหน้า login รอบหน้า probe จะพากลับเข้าระบบเอง
- * ซึ่งอันตรายมากกับเครื่องที่ใช้ร่วมกัน (ห้องคอม / ห้องพักครู)
- *
- * ไม่เคยโยน error: ล้าง session ฝั่งเราต้องสำเร็จเสมอ ต่อให้ SchoolOS ไม่ตอบ
- */
-export async function logoutFromSchoolOS() {
-  try {
-    const config = await loadConfig();
-    if (!config?.enabled) return;
-    await fetch(usersUrl(config.usersBase, '/api/auth/logout'), {
-      method: 'POST',
-      credentials: 'include',
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    });
-  } catch {
-    /* ปล่อยผ่าน — ฝั่งเราออกจากระบบไปแล้ว */
-  }
-}
+// การออกจากระบบที่ SchoolOS ย้ายไปทำใน leaveToPortal({ logoutFirst: true })
+// ด้วยการ navigate ไป /api/auth/logout?next= ครั้งเดียว — เชื่อถือได้กว่ายิง POST
+// ทิ้งไว้แล้วรีบเปลี่ยนหน้า ซึ่งเบราว์เซอร์ยกเลิก request กลางคันได้

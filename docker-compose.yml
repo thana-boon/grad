@@ -34,7 +34,8 @@ services:
       DATABASE_URL: postgres://${GRADUATE_DB_USER:-graduate}:${GRADUATE_DB_PASSWORD:?ต้องตั้ง GRADUATE_DB_PASSWORD ใน Portainer stack env}@${GRADUATE_DB_HOST:-postgres-core}:${GRADUATE_DB_PORT:-5432}/${GRADUATE_DB_NAME:-graduate}
 
       JWT_SECRET: ${JWT_SECRET:?ต้องตั้ง JWT_SECRET ใน Portainer stack env (สุ่มยาว ๆ เช่น openssl rand -hex 32)}
-      # อายุ session สูงสุด — ครบเมื่อไรก็หลุด ต่อให้ยังใช้งานอยู่
+      # อายุ token — ต่ออายุให้อัตโนมัติถ้ายังนั่งทำงานอยู่ (POST /api/auth/refresh)
+      # ตัวที่คุมจริงคือ idle timeout ฝั่งหน้าเว็บ
       # (อีกชั้นคือ "ไม่ขยับ 15 นาทีแล้วหลุด" ซึ่งอยู่ฝั่งหน้าเว็บ แก้ที่โค้ด ไม่ใช่ env)
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
 
@@ -53,6 +54,8 @@ services:
       SCHOOLOS_WEB_BASE: ${SCHOOLOS_WEB_BASE-/users}
       # ต้องตรงกับช่อง "ระบบปลายทาง (audience)" ของ API key ใบนี้เป๊ะ ๆ
       SCHOOLOS_HANDOFF_AUDIENCE: ${SCHOOLOS_HANDOFF_AUDIENCE:-grad}
+      # ปลายทางเมื่อ session จบ (กดออกเอง / หมดเวลา) — "/" = portal ของ SchoolOS
+      SCHOOLOS_PORTAL_URL: ${SCHOOLOS_PORTAL_URL-/}
 
       # จำนวน proxy hop ที่เชื่อ X-Forwarded-For (nginx portal = 1)
       # ผิดค่านี้ = rate limit ตอน login นับรวมทั้งโรงเรียนเป็นถังเดียว

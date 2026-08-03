@@ -30,6 +30,14 @@ const AUDIENCE = (process.env.SCHOOLOS_HANDOFF_AUDIENCE || 'grad').trim();
 // ไม่ต้องพึ่ง CORS เลย · ใส่ URL เต็มได้ถ้าอยู่คนละโดเมน (ต้องอยู่ใน SSO_ALLOWED_ORIGINS)
 const WEB_BASE = (process.env.SCHOOLOS_WEB_BASE ?? '/users').replace(/\/+$/, '');
 
+// ที่ที่ผู้ใช้จะถูกส่งไปเมื่อ session จบ (กดออกเอง / หมดเวลา / token หมดอายุ)
+// ค่าเริ่มต้นเป็น path ล้วน = หน้าแรกของโดเมนเดียวกัน (portal ของ SchoolOS)
+//
+// ต้องเป็น path เสมอถ้าเป็นไปได้ — ตอนล็อกเอาต์เราส่งค่านี้ไปเป็น ?next= ให้ Users
+// ซึ่งรับเฉพาะ path ในโดเมนตัวเอง หรือ origin ที่อยู่ใน SSO_ALLOWED_ORIGINS
+// (กัน open redirect) ใส่ URL เต็มที่ไม่ได้อยู่ในรายการจะโดนพากลับไปหน้า login ของ Users แทน
+const PORTAL_URL = (process.env.SCHOOLOS_PORTAL_URL || '/').trim();
+
 const ENABLED = process.env.SSO_SILENT_LOGIN !== '0';
 
 /**
@@ -46,7 +54,7 @@ function cappedExpiry(absoluteEndsAt) {
 // ค่าที่หน้า login ต้องรู้ก่อนไปขอโค้ดจาก SchoolOS — ตั้งที่ .env ฝั่ง server
 // ที่เดียว ไม่ต้อง build client ใหม่เวลาย้ายโดเมน (ค่าพวกนี้ไม่ใช่ความลับ)
 router.get('/config', (req, res) => {
-  res.json({ enabled: ENABLED, usersBase: WEB_BASE, audience: AUDIENCE });
+  res.json({ enabled: ENABLED, usersBase: WEB_BASE, audience: AUDIENCE, portalUrl: PORTAL_URL });
 });
 
 // ─── POST /api/auth/sso ──────────────────────────────────────────────────────

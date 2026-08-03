@@ -6,7 +6,7 @@ const db = require('../config/db');
 const schoolos = require('../config/schoolos');
 const logger = require('../config/logger');
 const { loginLimiter } = require('../middlewares/rateLimiter');
-const { ROLES } = require('../middlewares/authMiddleware');
+const { verifyToken, ROLES } = require('../middlewares/authMiddleware');
 const { logActivity } = require('./activityLogs');
 const { resolveAccess } = require('./staff');
 
@@ -200,6 +200,27 @@ router.post('/login', loginLimiter, async (req, res) => {
     logger.error('Login error', { error: err.message });
     res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
   }
+});
+
+// POST /api/auth/refresh — ต่ออายุ token ให้คนที่ยังนั่งทำงานอยู่
+//
+// เดิม token มีเพดานแข็ง 8 ชั่วโมง ครบเมื่อไรก็หลุด "ต่อให้ยังพิมพ์อยู่" ซึ่งแปลว่า
+// ครูที่กรอกข้อมูลค้างอยู่จะถูกเตะออกกลางคันและข้อมูลที่ยังไม่บันทึกหายไป
+// ตอนนี้หน้าเว็บจะขอต่ออายุให้เองเมื่อใกล้หมดและผู้ใช้ยังขยับอยู่จริง
+//
+// ปลอดภัยเพราะ:
+//   · ต้องมี token ที่ยัง valid อยู่ถึงจะต่อได้ (หมดอายุไปแล้วต่อไม่ได้ ต้องล็อกอินใหม่)
+//   · ฝั่งหน้าเว็บขอต่อเฉพาะตอนมีการขยับจริงในรอบที่ผ่านมา ไม่ใช่ทุกแท็บที่เปิดค้าง
+//   · ทิ้งเครื่องไว้เกิน idle timeout ก็หลุดอยู่ดี ซึ่งกันเคส "ลืมล็อกเอาต์ในห้องพักครู"
+//     ได้ตรงกว่าเพดาน 8 ชั่วโมงเสียอีก
+//
+// ตั้งใจ "ต่ออายุเฉย ๆ" ไม่ตรวจสิทธิ์ซ้ำ — การไล่ถามรายชื่อครู/ทะเบียนนักเรียนใหม่ทุกครั้ง
+// เปลืองโควตา SchoolOS และเสี่ยงลดสิทธิ์ตัวเองผิดพลาดตอน allowlist ยังว่าง
+// การถอดสิทธิ์จึงมีผลตอนล็อกอินรอบถัดไปเหมือนเดิม
+router.post('/refresh', verifyToken, (req, res) => {
+  // ตัด iat/exp ของใบเก่าทิ้ง ไม่งั้น jwt.sign จะไม่ยอมออกใบใหม่ให้
+  const { iat, exp, ...claims } = req.user;
+  res.json({ token: signToken(claims) });
 });
 
 module.exports = router;
