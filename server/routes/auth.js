@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const { signToken } = require('../config/jwt');
+const { VIA } = require('../config/identity');
 const db = require('../config/db');
 const schoolos = require('../config/schoolos');
 const logger = require('../config/logger');
@@ -47,9 +48,14 @@ async function loadStaffProfile(sosUser, teacher) {
  * @param sosUser  { id, code, name, role, active, status } — โครงเดียวกับที่ /auth/verify ตอบ
  * @param teacher  ระเบียนครูที่ดึงมาแล้ว (ถ้ามี) ไว้ประหยัดโควตา API
  * @param expiresIn อายุ token ที่อยากจำกัด (วินาที) — ไม่ส่ง = ใช้ JWT_EXPIRES_IN
+ * @param via      ทางที่เข้ามา (ดู VIA ใน config/identity.js)
+ * @param ssoSub   sub ของ session SchoolOS ที่รับช่วงมา — มีเฉพาะทาง silent SSO
  * @returns { token, user, access } · หรือ { denied: { status, reason, message } } เมื่อไม่ให้เข้า
  */
-async function issueStaffSession(sosUser, { teacher = null, expiresIn } = {}) {
+async function issueStaffSession(
+  sosUser,
+  { teacher = null, expiresIn, via = VIA.PASSWORD, ssoSub = null } = {}
+) {
   // SchoolOS ตอบ valid:true ให้ครูที่ลาออกแล้วด้วย (พร้อม active:false)
   // ระบบผู้เรียกต้องตรวจเอง — GradTrack ไม่ให้เข้า
   if (!sosUser.active) {
@@ -84,6 +90,8 @@ async function issueStaffSession(sosUser, { teacher = null, expiresIn } = {}) {
       name: sosUser.name,
       role,
       source: 'schoolos',
+      via,
+      ssoSub,
     },
     { expiresIn }
   );
@@ -132,6 +140,9 @@ router.post('/login', loginLimiter, async (req, res) => {
           name: user.name,
           role: user.role,
           source: 'local',
+          // บัญชี local ไม่มี session ฝั่ง SchoolOS ให้ผูก — ตัวตรวจสลับคนต้องข้ามคนกลุ่มนี้
+          // ไม่งั้นวันที่ SchoolOS ล่ม ทางเข้าสำรองจะล่มตามไปด้วย ซึ่งเป็นวันที่ต้องการมันที่สุด
+          via: VIA.LOCAL,
         });
 
         logger.info('Login success (local)', { username: uname, role: user.role, ip: req.ip });
@@ -218,9 +229,12 @@ router.post('/login', loginLimiter, async (req, res) => {
 // เปลืองโควตา SchoolOS และเสี่ยงลดสิทธิ์ตัวเองผิดพลาดตอน allowlist ยังว่าง
 // การถอดสิทธิ์จึงมีผลตอนล็อกอินรอบถัดไปเหมือนเดิม
 router.post('/refresh', verifyToken, (req, res) => {
-  // ตัด iat/exp ของใบเก่าทิ้ง ไม่งั้น jwt.sign จะไม่ยอมออกใบใหม่ให้
-  const { iat, exp, ...claims } = req.user;
-  res.json({ token: signToken(claims) });
+  // ส่ง claim ของใบเก่าเข้าไปทั้งก้อน — signToken() คัดเฉพาะ claim ที่เป็นตัวตนให้เอง
+  // (ตัด iat/exp ของใบเก่าทิ้งในตัว ไม่งั้น jwt.sign จะไม่ยอมออกใบใหม่ให้)
+  //
+  // ⚠️ ห้ามเขียน object literal ตรงนี้เด็ดขาด — ลืม claim ไหนไป claim นั้นจะหายเงียบ ๆ
+  // ตอนต่ออายุครั้งแรก แล้วอาการจะไปโผล่เป็นบั๊กคนละเรื่องอีกหลายชั่วโมงให้หลัง
+  res.json({ token: signToken(req.user) });
 });
 
 module.exports = router;

@@ -80,6 +80,47 @@ async function getHandoffCode({ usersBase, audience }) {
 }
 
 /**
+ * ถาม SchoolOS สด ๆ ว่า "ตอนนี้เบราว์เซอร์นี้เป็นใคร"
+ *
+ * หัวใจของการกันเคส "ล็อกอินคนใหม่ที่ portal แล้วระบบยังโหลดคนเก่า": session ของเรา
+ * กับของ SchoolOS เป็นคนละใบ handoff แค่ "คัดลอกตัวตน" มาตอนหนึ่งเท่านั้น ไม่ได้ผูก
+ * สองใบเข้าด้วยกัน การผูกจึงเป็นสิ่งที่เราต้องถามซ้ำเอง
+ *
+ * @returns { valid, sub, code } · null = **ถามไม่ได้** (เน็ต/CORS/service ล่ม/SSO ปิด)
+ *
+ * ⚠️ null ห้ามตีความว่า "ไม่มีใครล็อกอิน" เด็ดขาด — ถ้าเหมารวมกัน เน็ตกระตุกทีเดียว
+ * จะเตะทั้งโรงเรียนออกจากระบบพร้อมกัน ผู้เรียกต้องไม่ทำอะไรเลยเมื่อได้ null
+ * "ไม่มีใครล็อกอิน" คือ HTTP 200 พร้อม valid:false ซึ่งต้องอ่านจาก field ไม่ใช่ status
+ *
+ * endpoint นี้เป็น cookie-based ล้วน (ห้ามยิงจาก server ด้วย X-API-Key เพราะ cookie
+ * sso_session เป็น httpOnly อยู่ที่เบราว์เซอร์เท่านั้น) · ตอบจาก claim ใน token ไม่แตะ
+ * ฐานข้อมูล และ **ไม่** ต่ออายุ idle window ของ SchoolOS จึงยิงบ่อยได้โดยไม่มีผลข้างเคียง
+ */
+export async function fetchLiveSession() {
+  const config = await loadConfig();
+  if (!config?.enabled) return null;
+
+  try {
+    const res = await fetch(usersUrl(config.usersBase, '/api/auth/session'), {
+      credentials: 'include', // ขาดบรรทัดนี้ = ได้ valid:false ตลอดโดยไม่มี error ให้เห็น
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return {
+      valid: Boolean(data?.valid && data.user),
+      sub: data?.user?.sub ?? null,
+      code: data?.user?.code ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * ลองเข้าระบบเงียบ ๆ
  * @returns { token, user } เมื่อสำเร็จ · null เมื่อยังไม่ได้ล็อกอิน SchoolOS หรือ SSO ปิดอยู่
  * @throws  error ของ axios เมื่อ server ปฏิเสธแบบมีเหตุผล (403 = ไม่มีสิทธิ์เข้าระบบนี้)

@@ -16,6 +16,7 @@ const express = require('express');
 const router = express.Router();
 const schoolos = require('../config/schoolos');
 const logger = require('../config/logger');
+const { VIA } = require('../config/identity');
 const { ssoLimiter } = require('../middlewares/rateLimiter');
 const { logActivity } = require('./activityLogs');
 const { issueStaffSession } = require('./auth');
@@ -70,6 +71,15 @@ router.post('/', ssoLimiter, async (req, res) => {
     const expiresIn = cappedExpiry(absoluteEndsAt);
     const identity = String(session.code || session.sub || '').trim();
 
+    // ─── ผูก session ของเราเข้ากับ session ของ SchoolOS ───────────────────────
+    // เก็บ sub ที่ SchoolOS ให้มา **ดิบ ๆ ไม่แปลง** เพราะหน้าเว็บต้องเอาไปเทียบกับ
+    // GET /api/auth/session ของ SchoolOS ตรง ๆ (ดู SessionGuard ฝั่ง client)
+    //
+    // ถ้าไม่เก็บไว้ session ของเรากับของ SchoolOS จะเป็นคนละใบที่ไม่รู้จักกันเลย
+    // พอมีคนล็อกอินใหม่ที่ portal cookie ของเราก็ยังชี้ไปที่คนเก่าและยัง valid อยู่
+    // → คนใหม่เห็นข้อมูลของคนเก่า ซึ่งบนเครื่องส่วนกลางคือปัญหาใหญ่
+    const ssoSub = String(session.sub || session.code || '').trim();
+
     if (!identity) {
       logger.warn('SSO: handoff ไม่มีรหัสผู้ใช้', { role: session.role });
       return res.status(403).json({ message: 'ข้อมูลผู้ใช้จาก SchoolOS ไม่ครบ' });
@@ -89,15 +99,17 @@ router.post('/', ssoLimiter, async (req, res) => {
         return res.status(403).json({ message: 'ไม่พบข้อมูลนักเรียนของคุณในระบบ กรุณาติดต่อครูแนะแนว' });
       }
 
-      const via = gate.graduated ? 'sso-alumni' : 'sso';
+      const audit = gate.graduated ? 'sso-alumni' : 'sso';
       const result = await buildStudentSession(gate.student, {
         username: gate.student.student_code,
-        via,
+        via: VIA.SSO,
+        audit,
+        ssoSub,
         expiresIn,
       });
 
       logger.info('SSO login success (student)', {
-        student_code: gate.student.student_code, via, ip: req.ip,
+        student_code: gate.student.student_code, via: audit, ip: req.ip,
       });
       return res.json(result);
     }
@@ -126,7 +138,12 @@ router.post('/', ssoLimiter, async (req, res) => {
       status: teacher.employment_status,
     };
 
-    const { denied, access, token, user } = await issueStaffSession(sosUser, { teacher, expiresIn });
+    const { denied, access, token, user } = await issueStaffSession(sosUser, {
+      teacher,
+      expiresIn,
+      via: VIA.SSO,
+      ssoSub,
+    });
     if (denied) {
       logger.warn(`SSO blocked (teacher): ${denied.reason}`, {
         teacher_code: identity, sosRole: teacher.role,

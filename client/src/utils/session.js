@@ -35,7 +35,18 @@ export const USER_KEY = 'user';
 export const LOGOUT_REASONS = {
   IDLE: 'idle',       // ไม่ได้ใช้งานนานเกินกำหนด
   EXPIRED: 'expired', // token หมดอายุ / server ตอบ 401
+  // ─── สองตัวล่างมาจากตัวตรวจตัวตนสด (components/SessionGuard.jsx) ───────────
+  SSO_ENDED: 'sso_ended',       // ไม่มีใครล็อกอิน SchoolOS แล้ว — session เราหมดความชอบธรรม
+  SSO_DENIED: 'sso_denied',     // เปลี่ยนคนที่ portal แล้ว แต่คนใหม่ไม่มีสิทธิ์ใช้ระบบนี้
 };
+
+// เหตุผลที่ "ต้องกรอกรหัสเอง" เท่านั้น — หลุดเพราะหมดเวลาแล้วให้ silent SSO พาเข้าใหม่ทันที
+// เท่ากับ idle timeout ไม่มีความหมายเลย และผู้ใช้จะไม่ทันเห็นด้วยซ้ำว่าโดนเตะเพราะอะไร
+//
+// ส่วนเหตุผลฝั่ง SSO ไม่อยู่ในนี้: มันแปลว่า "ตัวตนที่ SchoolOS เปลี่ยนไปแล้ว"
+// การให้คนที่ล็อกอิน SchoolOS อยู่ตอนนี้กรอกรหัสเองซ้ำไม่ได้เพิ่มความปลอดภัยอะไร
+// มีแต่จะทำให้เครื่องส่วนกลางใช้ยากขึ้นเปล่า ๆ
+export const MANUAL_LOGIN_REASONS = [LOGOUT_REASONS.IDLE, LOGOUT_REASONS.EXPIRED];
 
 // ─── บันทึกความเคลื่อนไหว ────────────────────────────────────────────────────
 
@@ -75,15 +86,30 @@ export function isIdleExpired() {
 // decode เฉย ๆ ไม่ verify — ใช้เพื่อ "รู้ล่วงหน้า" ว่าหมดอายุแล้วจะได้ไม่ต้อง
 // ยิง request ไปให้ server ตอบ 401 ก่อน ความถูกต้องจริงตรวจที่ server เสมอ
 
-export function getTokenExpiry(token) {
-  if (!token) return 0;
+/**
+ * claim ทั้งก้อนใน token · {} เมื่ออ่านไม่ออก
+ *
+ * ใช้อ่านฟิลด์ที่ไม่ได้อยู่ใน user object เช่น via / ssoSub ที่ตัวตรวจตัวตนสดต้องใช้
+ * (ดู components/SessionGuard.jsx) — ค่าที่ได้ใช้ "ตัดสินใจฝั่งหน้าเว็บ" เท่านั้น
+ * ห้ามเอาไปใช้แทนการตรวจสิทธิ์ ซึ่ง server ทำจากลายเซ็นเสมอ
+ *
+ * ⚠️ ข้อความภาษาไทย (เช่น name) ที่อ่านออกมาทางนี้จะเพี้ยน เพราะ atob คืนไบต์ดิบ
+ * ไม่ได้ decode UTF-8 — อ่านเฉพาะฟิลด์ที่เป็น ASCII
+ */
+export function getTokenClaims(token) {
+  if (!token) return {};
   try {
     const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const { exp } = JSON.parse(atob(base64));
-    return typeof exp === 'number' ? exp * 1000 : 0;
+    const claims = JSON.parse(atob(base64));
+    return claims && typeof claims === 'object' ? claims : {};
   } catch {
-    return 0; // token พัง → ให้ 401 จาก server จัดการ
+    return {}; // token พัง → ให้ 401 จาก server จัดการ
   }
+}
+
+export function getTokenExpiry(token) {
+  const { exp } = getTokenClaims(token);
+  return typeof exp === 'number' ? exp * 1000 : 0;
 }
 
 export function isTokenExpired(token) {
@@ -133,6 +159,25 @@ export function getLogoutReason() {
   return localStorage.getItem(LOGOUT_REASON_KEY);
 }
 
+// ─── เขียน/ล้าง session ใน localStorage ──────────────────────────────────────
+// จุดเดียวที่รู้รูปร่างของ session ที่เก็บไว้ — AuthContext (ผ่าน React state)
+// และตัวตรวจตัวตนสด (ที่โหลดหน้าใหม่ทันทีจึงไม่ผ่าน React) ใช้ตัวเดียวกัน
+// ไม่งั้นจะมีที่ที่ลืม markActivity หรือลืมล้าง logoutReason แล้วอาการไปโผล่ที่อื่น
+
+export function saveSession(user, token) {
+  setLogoutReason(null); // ล็อกอินใหม่แล้ว — ข้อความ "หมดเวลา" รอบก่อนไม่ต้องค้าง
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  localStorage.setItem(TOKEN_KEY, token);
+  markActivity({ force: true }); // เริ่มจับเวลา idle ตั้งแต่วินาทีที่ล็อกอิน
+}
+
+export function clearStoredSession(reason) {
+  setLogoutReason(reason);
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  clearActivity();
+}
+
 // ─── สะพานระหว่าง axios interceptor กับ AuthContext ──────────────────────────
 // interceptor อยู่นอก React จึงเรียก logout() ของ context ตรง ๆ ไม่ได้
 // AuthContext ฝากฟังก์ชันไว้ตอน mount แล้ว interceptor เรียกผ่านตัวนี้
@@ -149,8 +194,5 @@ export function notifySessionExpired(reason = LOGOUT_REASONS.EXPIRED) {
     return;
   }
   // ยังไม่มี AuthContext (เช่นหน้า print ที่อยู่นอกโครงแอป) → เคลียร์เองแบบดิบ ๆ
-  setLogoutReason(reason);
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  clearActivity();
+  clearStoredSession(reason);
 }

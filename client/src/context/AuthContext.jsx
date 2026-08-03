@@ -6,11 +6,13 @@ import {
   TOKEN_KEY,
   USER_KEY,
   clearActivity,
+  clearStoredSession,
   getTokenExpiry,
   isIdleExpired,
   isTokenExpired,
   markActivity,
   msSinceActivity,
+  saveSession,
   setLogoutReason,
   setSessionExpiredHandler,
 } from '../utils/session';
@@ -96,10 +98,7 @@ export function AuthProvider({ children }) {
   // ถ้าหน้า login เด้งออกเองด้วยจะวนไม่รู้จบระหว่าง portal กับ GradTrack และบัญชี
   // local (ทางเข้าสำรองตอน SchoolOS ล่ม) จะไม่มีทางเข้าถึงฟอร์มได้เลย
   const clearSession = useCallback((reason, { toPortal = true } = {}) => {
-    setLogoutReason(reason);
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    clearActivity();
+    clearStoredSession(reason);
     setSession({ user: null, token: null });
     if (toPortal) leaveToPortal();
   }, []);
@@ -112,11 +111,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback((userData, jwtToken) => {
-    setLogoutReason(null); // ล็อกอินใหม่แล้ว — ข้อความ "หมดเวลา" รอบก่อนไม่ต้องค้าง
     clearSilentLoginBlock();
-    localStorage.setItem(USER_KEY, JSON.stringify(userData));
-    localStorage.setItem(TOKEN_KEY, jwtToken);
-    markActivity({ force: true }); // เริ่มจับเวลา idle ตั้งแต่วินาทีที่ล็อกอิน
+    saveSession(userData, jwtToken);
     setSession({ user: userData, token: jwtToken });
   }, []);
 

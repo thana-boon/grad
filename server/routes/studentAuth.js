@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { signToken } = require('../config/jwt');
+const { VIA } = require('../config/identity');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -261,9 +262,17 @@ async function checkStudentAccess({ code, active = null, status = null, found = 
 
 /**
  * ออก session ของนักเรียนหลังผ่านด่านของ checkStudentAccess() แล้ว
+ *
+ * @param via    ทางที่เข้ามา สำหรับเก็บลง token (ดู VIA ใน config/identity.js)
+ * @param audit  ป้ายละเอียดสำหรับ activity log ('schoolos' | 'legacy' | 'sso-alumni' …)
+ *               แยกจาก via เพราะ log อยากรู้ละเอียดกว่าที่ token ต้องใช้ตัดสิน
+ * @param ssoSub sub ของ session SchoolOS ที่รับช่วงมา — มีเฉพาะทาง silent SSO
  * @returns { token, user } — โครงเดียวกับที่ /student/login เคยตอบ
  */
-async function buildStudentSession(student, { username, via, expiresIn } = {}) {
+async function buildStudentSession(
+  student,
+  { username, via = VIA.PASSWORD, audit, ssoSub = null, expiresIn } = {}
+) {
   const code = student.student_code;
 
   // สร้าง profile ถ้ายังไม่มี (ON CONFLICT กันกรณีล็อกอินซ้อนกันสองแท็บ)
@@ -278,7 +287,7 @@ async function buildStudentSession(student, { username, via, expiresIn } = {}) {
   );
 
   const token = signToken(
-    { student_code: code, username: username || code, role: 'student' },
+    { student_code: code, username: username || code, role: 'student', via, ssoSub },
     { expiresIn }
   );
 
@@ -291,7 +300,7 @@ async function buildStudentSession(student, { username, via, expiresIn } = {}) {
     name: `${student.first_name} ${student.last_name}`,
     role: 'student',
     action: 'login',
-    target: via,
+    target: audit || via,
   });
 
   return {
@@ -322,7 +331,9 @@ router.post('/login', loginLimiter, async (req, res) => {
 
   try {
     let student = null;
-    let via = null;
+    // ป้ายสำหรับ activity log เท่านั้น — ทาง /student/login ทุกเส้นคือการกรอกรหัสผ่านเอง
+    // token ที่ออกจึงเป็น VIA.PASSWORD เสมอ (ไม่มี session ของ SchoolOS ให้ผูก)
+    let audit = null;
 
     // ── 1) รหัสผ่าน SchoolOS ──────────────────────────────────────────────────
     const sosUser = await schoolos.verify('student', paddedCode, password);
@@ -341,8 +352,8 @@ router.post('/login', loginLimiter, async (req, res) => {
       }
 
       student = gate.student;
-      // แยก via ไว้ให้ audit log อ่านออกว่าเป็นการเข้าใช้ของศิษย์เก่า ไม่ใช่เด็กปัจจุบัน
-      via = sosUser.active ? 'schoolos' : 'schoolos-alumni';
+      // แยกไว้ให้ audit log อ่านออกว่าเป็นการเข้าใช้ของศิษย์เก่า ไม่ใช่เด็กปัจจุบัน
+      audit = sosUser.active ? 'schoolos' : 'schoolos-alumni';
     }
 
     // ── 2) legacy: Skdw + เลขบัตรประชาชน ─────────────────────────────────────
@@ -362,7 +373,7 @@ router.post('/login', loginLimiter, async (req, res) => {
           return res.status(gate.denied.status).json({ message: gate.denied.message });
         }
         student = gate.student;
-        via = 'legacy';
+        audit = 'legacy';
       }
     }
 
@@ -371,9 +382,15 @@ router.post('/login', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
     }
 
-    const session = await buildStudentSession(student, { username: paddedCode, via });
+    const session = await buildStudentSession(student, {
+      username: paddedCode,
+      via: VIA.PASSWORD,
+      audit,
+    });
 
-    logger.info('Student login success', { student_code: student.student_code, via, ip: req.ip });
+    logger.info('Student login success', {
+      student_code: student.student_code, via: audit, ip: req.ip,
+    });
     res.json(session);
   } catch (err) {
     // key มีปัญหา ≠ ผู้ใช้กรอกผิด — ต้องแยกให้ชัด ไม่งั้นไล่หาสาเหตุไม่เจอ

@@ -6,6 +6,7 @@ import Icon from '../components/ui/Icon';
 import {
   IDLE_TIMEOUT_MINUTES,
   LOGOUT_REASONS,
+  MANUAL_LOGIN_REASONS,
   getLogoutReason,
   wasRecentlyLoggedOut,
 } from '../utils/session';
@@ -19,7 +20,26 @@ const SSO_RETRY_GAP_MS = 15 * 1000;
 const TIMEOUT_NOTICES = {
   [LOGOUT_REASONS.IDLE]: `ไม่ได้ใช้งานนานเกิน ${IDLE_TIMEOUT_MINUTES} นาที ระบบออกจากระบบให้อัตโนมัติ กรุณาเข้าสู่ระบบใหม่`,
   [LOGOUT_REASONS.EXPIRED]: 'เซสชันหมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่',
+  [LOGOUT_REASONS.SSO_ENDED]: 'บัญชี SchoolOS ที่ใช้อยู่ออกจากระบบไปแล้ว กรุณาเข้าสู่ระบบใหม่',
+  [LOGOUT_REASONS.SSO_DENIED]:
+    'บัญชี SchoolOS ที่เข้าสู่ระบบอยู่ตอนนี้ไม่มีสิทธิ์ใช้ GradTrack กรุณาเข้าสู่ระบบด้วยบัญชีอื่น',
 };
+
+/**
+ * ต้องกรอกรหัสเองรอบนี้ไหม (= ข้าม silent SSO)
+ *
+ * ข้ามเมื่อ:
+ *   · เพิ่งกดออกจากระบบ (ดู blockSilentLogin ใน utils/sso.js)
+ *   · เพิ่งถูกเตะเพราะหมดเวลา — ไม่งั้น idle timeout ไร้ความหมาย และผู้ใช้จะไม่ทัน
+ *     เห็นด้วยซ้ำว่าโดนเตะเพราะอะไร ("เพิ่ง" เท่านั้น ดู wasRecentlyLoggedOut)
+ *
+ * แต่ **ไม่** ข้ามเมื่อหลุดเพราะตัวตนฝั่ง SchoolOS เปลี่ยน (SSO_ENDED/SSO_DENIED) —
+ * นั่นแปลว่ามีคนใหม่อยู่หน้าเครื่อง การบังคับให้เขากรอกรหัสเองไม่ได้เพิ่มความปลอดภัย
+ * อะไรเลย มีแต่ทำให้เครื่องส่วนกลางใช้ยากขึ้นเปล่า ๆ
+ */
+const shouldSkipSso = () =>
+  isSilentLoginBlocked() ||
+  (wasRecentlyLoggedOut() && MANUAL_LOGIN_REASONS.includes(getLogoutReason()));
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -35,20 +55,15 @@ export default function LoginPage() {
   // ว่าไม่ได้เด้งออกเพราะระบบพัง (ค่าถูกล้างตอนล็อกอินสำเร็จ/กดออกเอง ไม่ใช่ตอนอ่าน)
   // เตือนเฉพาะตอนที่เพิ่งโดนเตะจริง ๆ — ค้างข้ามวันแล้วยังขึ้น "หมดเวลาใช้งาน"
   // ให้คนที่เพิ่งเปิดเว็บมาเฉย ๆ คือข้อความที่ผิดบริบท
+  // ข้อความจาก server (403) ตรงประเด็นกว่าข้อความกลาง ๆ ที่เตรียมไว้ — ขึ้นทีเดียวพอ
   const [noticeDismissed, setNoticeDismissed] = useState(false);
   const notice =
-    noticeDismissed || !wasRecentlyLoggedOut() ? '' : TIMEOUT_NOTICES[getLogoutReason()] || '';
+    noticeDismissed || error || !wasRecentlyLoggedOut()
+      ? ''
+      : TIMEOUT_NOTICES[getLogoutReason()] || '';
 
-  // ── silent SSO: ล็อกอิน SchoolOS ไว้แล้วก็เข้าได้เลย ─────────────────────────
-  //
-  // ข้ามเมื่อ:
-  //   · เพิ่งถูกเตะออกเพราะหมดเวลา — ต้องกรอกเองใหม่ ไม่งั้น idle timeout ไร้ความหมาย
-  //     และผู้ใช้จะไม่ทันเห็นด้วยซ้ำว่าโดนเตะออกเพราะอะไร
-  //     ("เพิ่ง" เท่านั้น — ไม่ใช่ "เคยโดนเมื่อไหร่ก็ได้" ดู wasRecentlyLoggedOut)
-  //   · เพิ่งกดออกจากระบบ (ดู blockSilentLogin ใน utils/sso.js)
-  const [checkingSso, setCheckingSso] = useState(
-    () => !wasRecentlyLoggedOut() && !isSilentLoginBlocked()
-  );
+  // ── silent SSO: ล็อกอิน SchoolOS ไว้แล้วก็เข้าได้เลย (ดู shouldSkipSso) ──────
+  const [checkingSso, setCheckingSso] = useState(() => !shouldSkipSso());
   const ssoBusy = useRef(false);    // กำลังลองอยู่ ห้ามยิงซ้อน
   const ssoLastTry = useRef(0);     // กันยิงรัวตอนสลับแท็บถี่ ๆ
   const mounted = useRef(true);
@@ -69,7 +84,7 @@ export default function LoginPage() {
     const attempt = async (background) => {
       if (ssoBusy.current) return;
       // ธงกันอาจหมดอายุไปแล้วตั้งแต่ตอนเปิดหน้า จึงต้องอ่านใหม่ทุกครั้ง ไม่ใช้ค่าที่คิดไว้
-      if (wasRecentlyLoggedOut() || isSilentLoginBlocked()) return;
+      if (shouldSkipSso()) return;
       if (background) {
         if (formTouched.current) return;
         if (Date.now() - ssoLastTry.current < SSO_RETRY_GAP_MS) return;
