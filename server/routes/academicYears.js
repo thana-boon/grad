@@ -5,14 +5,31 @@ const schoolos = require('../config/schoolos');
 const { verifyToken, adminOnly } = require('../middlewares/authMiddleware');
 
 // GET  /api/academic-years
-// SchoolOS Public API ไม่มี endpoint ให้ list ปีการศึกษา — schoolos.getAcademicYears()
-// อ่านปีปัจจุบันจาก field academicYear ของ /students แล้วรวมกับปีที่เคยเห็น (ตาราง academic_years)
+// syncAcademicYears() ไล่เก็บปีทั้งหมดจาก SchoolOS (หน่วงเองทุก 6 ชม.) แล้ว
+// getAcademicYears() อ่านปีปัจจุบันจาก /students + คืนรายการจากตาราง academic_years
+//
+// ปีที่ผู้ดูแล SchoolOS เพิ่งเพิ่มจึงโผล่มาเองภายในไม่กี่ชั่วโมง ไม่ต้องรีสตาร์ท
+// (อยากได้เดี๋ยวนี้ให้กดปุ่มที่หน้าปีการศึกษา → POST /sync)
 router.get('/', verifyToken, async (req, res) => {
   try {
+    // ซิงก์ล้มไม่ควรทำให้ทั้งหน้าพัง — ยังมีปีที่เคยเก็บไว้ให้ใช้งานต่อได้
+    await schoolos.syncAcademicYears().catch(() => {});
     const { years } = await schoolos.getAcademicYears();
     res.json(years || []);
   } catch (err) {
     res.status(500).json({ message: 'โหลดปีการศึกษาไม่สำเร็จ', error: err.message });
+  }
+});
+
+// POST /api/academic-years/sync
+// บังคับซิงก์ทันที (admin only) — ใช้ตอนผู้ดูแล SchoolOS เพิ่งเพิ่มปีแล้วอยากเห็นเลย
+router.post('/sync', verifyToken, adminOnly, async (req, res) => {
+  try {
+    const { synced } = await schoolos.syncAcademicYears({ force: true });
+    const { years } = await schoolos.getAcademicYears();
+    res.json({ synced, years: years || [] });
+  } catch (err) {
+    res.status(500).json({ message: 'ซิงก์ปีการศึกษาไม่สำเร็จ', error: err.message });
   }
 });
 

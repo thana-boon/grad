@@ -499,9 +499,131 @@ async function getStudentByCode(rawCode, opts) {
 }
 
 // ─── academic years ──────────────────────────────────────────────────────────
-// SchoolOS ไม่มี endpoint ให้ list ปีการศึกษา — มีแต่ field academicYear ที่ติดมากับ
-// /students จึงอ่านปีปัจจุบันจากตรงนั้น แล้วสะสมลงตาราง academic_years ของเราเอง
-// เพื่อให้หน้า "ปีการศึกษา" ยังเลือกย้อนหลังได้หลังขึ้นปีใหม่
+// getAcademicYears() อ่าน "ปีปัจจุบัน" จาก field academicYear ที่ติดมากับ /students
+// แล้วคืนรายการทั้งหมดจากตาราง academic_years ของเรา — ทางนี้เห็นได้แค่ปีปัจจุบัน
+// ปีอื่นเข้าตารางมาทาง syncAcademicYears() ข้างล่าง
+
+/**
+ * ไล่เก็บ "ปีการศึกษาทั้งหมดที่ SchoolOS มี" ลงตาราง academic_years
+ *
+ * ทางหลัก: GET /academic-years ซึ่ง SchoolOS เพิ่งมี — แต่ API key ของ GradTrack
+ * ยังไม่มี scope years:read (ตอบ 403 insufficient_scope) ยังไงก็ลองทางนี้ก่อนเสมอ
+ * วันที่ผู้ดูแลเปิด scope ให้ ระบบจะย้ายมาใช้เองโดยไม่ต้องแก้โค้ด
+ *
+ * ทางสำรอง: ไล่ยิง /students?yearId=N ทีละ id — ทุก response แถม academicYear
+ * ของปีที่ถามมาให้ จึงใช้เป็นทะเบียนปีได้ด้วย scope students:read ที่มีอยู่แล้ว
+ * (ปีที่ไม่มีจริงจะได้ academicYear = null ใช้เป็นสัญญาณจบการไล่)
+ *
+ * ห้ามเรียกทุก request — ทางสำรองกินหลาย request ต่อรอบ และเพดานคือ 600 req/ชม.
+ * จึงหน่วงด้วย settings.years_synced_at ไว้ (force = true ตอนสตาร์ทและตอนกดปุ่ม)
+ */
+const YEAR_SCAN_MAX_ID = 12;   // เพดาน id ที่ยอมไล่ — กันยิงยาวถ้า id กระโดด
+const YEAR_SCAN_MISS_STOP = 3; // เจอ id ที่ไม่มีปีติดกันกี่ครั้งถึงเลิกไล่
+const YEAR_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** อ่านรายการปีจาก payload ของ /academic-years แบบไม่เชื่ออะไรเลย (ยังไม่เคยเห็นของจริง) */
+function parseYearList(payload) {
+  const rows = Array.isArray(payload) ? payload : payload?.data;
+  if (!Array.isArray(rows)) return null;
+
+  const years = [];
+  for (const y of rows) {
+    const id = Number(y?.id);
+    const be = yearNum(y?.year ?? y?.yearBe ?? y?.year_be);
+    // ทิ้งแถวที่อ่าน id หรือปีไม่ออก — เขียนปีมั่ว ๆ ลงตารางแย่กว่าไม่มีปีนั้น
+    if (!Number.isFinite(id) || be === null) continue;
+    years.push({ id, year_be: String(be), title: `ปีการศึกษา ${be}` });
+  }
+  return years.length ? years : null;
+}
+
+/** null = ทางนี้ใช้ไม่ได้ (ไม่มี scope / รูปแบบไม่ตรงที่คาด) ให้ไปทางสำรอง */
+async function fetchYearsViaEndpoint() {
+  let res;
+  try {
+    res = await sos('/academic-years');
+  } catch (err) {
+    if (err instanceof SosKeyError) throw err;
+    return null;
+  }
+  if (!res.ok) return null;
+
+  try {
+    return parseYearList(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+async function probeYears() {
+  const found = [];
+  let misses = 0;
+
+  for (let id = 1; id <= YEAR_SCAN_MAX_ID && misses < YEAR_SCAN_MISS_STOP; id++) {
+    let d = null;
+    try {
+      d = await getJson(`/students?pageSize=1&status=all&yearId=${id}`, 'probeYears');
+    } catch (err) {
+      // key พังคือปัญหาคนละชั้น ต้องดังออกไป ไม่ใช่กลืนเป็น "ไม่มีปีนี้"
+      if (err instanceof SosKeyError) throw err;
+      misses++;
+      continue;
+    }
+
+    const be = yearNum(d?.academicYear?.year);
+    if (be === null) {
+      misses++;
+      continue;
+    }
+    misses = 0;
+    found.push({
+      id: Number(d.academicYear.id) || id,
+      year_be: String(be),
+      title: `ปีการศึกษา ${be}`,
+    });
+  }
+
+  return found;
+}
+
+async function syncAcademicYears({ force = false } = {}) {
+  if (!force) {
+    const [[row]] = await db
+      .query(`SELECT "value" FROM settings WHERE "key" = 'years_synced_at'`)
+      .catch(() => [[null]]);
+    const last = Number(row?.value || 0);
+    if (last && Date.now() - last < YEAR_SYNC_INTERVAL_MS) return { synced: 0, skipped: true };
+  }
+
+  const years = (await fetchYearsViaEndpoint()) ?? (await probeYears());
+  if (!years.length) return { synced: 0, skipped: false };
+
+  // ไม่แตะ is_current ตรงนี้ — ปีที่ SchoolOS ถือเป็นปีปัจจุบันมาจาก /students
+  // (ไม่ระบุ yearId) ซึ่ง getAcademicYears() จัดการอยู่แล้ว มีเจ้าของเดียวพอ
+  for (const y of years) {
+    await db
+      .query(
+        `INSERT INTO academic_years (id, year_be, title, is_current)
+         VALUES (?, ?, ?, 0)
+         ON CONFLICT (id) DO UPDATE
+           SET year_be = EXCLUDED.year_be, title = EXCLUDED.title, seen_at = CURRENT_TIMESTAMP`,
+        [y.id, y.year_be, y.title]
+      )
+      .catch((e) => logger.warn('cache academic year failed', { id: y.id, error: e.message }));
+  }
+
+  await db
+    .query(
+      `INSERT INTO settings ("key", "value") VALUES ('years_synced_at', ?)
+       ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value"`,
+      [String(Date.now())]
+    )
+    .catch(() => {});
+
+  logger.info('ซิงก์ปีการศึกษาจาก SchoolOS', { years: years.map((y) => y.year_be).join(', ') });
+  return { synced: years.length, skipped: false };
+}
+
 async function getAcademicYears() {
   let current = null;
 
@@ -744,6 +866,7 @@ module.exports = {
   isRecentYear,
   getAcademicYears,
   getAcademicYearById,
+  syncAcademicYears,
   listTeachers,
   listAllTeachers,
   findTeacher,

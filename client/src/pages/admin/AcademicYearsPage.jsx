@@ -8,6 +8,7 @@ export default function AcademicYearsPage() {
   const [activeYearId, setActiveYearId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // year_id ที่กำลัง set
+  const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = 'success') => {
@@ -34,6 +35,21 @@ export default function AcademicYearsPage() {
 
   useEffect(() => { load(); }, []);
 
+  // ดึงรายการปีจาก SchoolOS ใหม่ทันที — ปกติระบบซิงก์เองทุก 6 ชม. ปุ่มนี้ไว้ใช้
+  // ตอนผู้ดูแล SchoolOS เพิ่งเพิ่มปีแล้วอยากเห็นเดี๋ยวนี้ ไม่ต้องรอรอบถัดไป
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post('/academic-years/sync');
+      setYears(data.years || []);
+      showToast(`ซิงก์แล้ว พบ ${data.synced} ปีการศึกษา`);
+    } catch {
+      showToast('ซิงก์จาก SchoolOS ไม่สำเร็จ', 'error');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   // ตั้งปีการศึกษาที่ GradTrack ใช้งาน
   const handleSetActive = async (yearId) => {
     setSaving(yearId);
@@ -58,7 +74,16 @@ export default function AcademicYearsPage() {
         icon="calendar"
         title="ปีการศึกษา"
         subtitle="เลือกปีการศึกษาที่ GradTrack ใช้งาน — ทุกหน้าจะอ้างอิงปีนี้เป็นค่าเริ่มต้น"
-      />
+      >
+        <button className="btn btn-outline btn-sm gap-1.5" onClick={handleSync} disabled={syncing}>
+          {syncing ? (
+            <span className="loading loading-spinner loading-xs" />
+          ) : (
+            <Icon name="refresh" size={14} />
+          )}
+          ซิงก์จาก SchoolOS
+        </button>
+      </PageHeader>
 
       {/* ปีที่ใช้งานอยู่ */}
       {activeYear && (

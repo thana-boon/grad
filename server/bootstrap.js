@@ -12,9 +12,15 @@ const logger = require('./config/logger');
 const db = require('./config/db');
 const schoolos = require('./config/schoolos');
 
-// ปีการศึกษาปัจจุบันจาก SchoolOS → เก็บลงตาราง academic_years
+// ปีการศึกษาจาก SchoolOS → เก็บลงตาราง academic_years
 // ทำให้หน้า "ปีการศึกษา" มีตัวเลือกตั้งแต่เปิดระบบครั้งแรก ไม่ใช่ dropdown ว่าง
 async function cacheCurrentAcademicYear() {
+  // force: ตอนสตาร์ทควรได้ของสดเสมอ ไม่ต้องรอหน้าต่างหน่วง 6 ชม.
+  // ล้มก็ข้ามไป — ยังอ่านปีปัจจุบันได้จาก getAcademicYears() ข้างล่างอยู่ดี
+  await schoolos.syncAcademicYears({ force: true }).catch((err) =>
+    logger.warn('Bootstrap: ซิงก์รายการปีการศึกษาไม่สำเร็จ (ข้ามไป)', { error: err.message })
+  );
+
   const { current } = await schoolos.getAcademicYears();
   if (!current) {
     logger.warn('Bootstrap: SchoolOS ไม่ได้คืนปีการศึกษาปัจจุบัน');
