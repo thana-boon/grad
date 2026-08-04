@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import { flushSync } from 'react-dom';
 import { domToCanvas } from 'modern-screenshot';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -675,6 +676,92 @@ export default function ReportPage() {
   };
 
   // ── Export helpers ──
+  // ── กัน export ค้างเมื่อจอดับ / แท็บถูกซ่อน ────────────────────────────────
+  // เบราว์เซอร์หยุดยิง requestAnimationFrame และหน่วง setTimeout (แย่สุด 1 ครั้ง/นาที)
+  // ทันทีที่แท็บไม่ได้อยู่หน้าจอ ลูป export ที่ "รอเฟรม" จึงค้างกลางคัน
+  // แก้ 2 ทาง: ขอ wake lock กันจอดับ + ไม่ผูกลูปกับเฟรมอีกต่อไป (ดู renderCardCanvas)
+  //
+  // ถือ wake lock ไว้ตลอดช่วงที่ยัง export อยู่ แล้วปล่อยเองเมื่อจบ (ผูกกับ exporting ที่เดียว
+  // จะได้ไม่ต้องไล่ปล่อยในทุก export ฟังก์ชัน) — ระบบปล่อย lock ทิ้งเองทุกครั้งที่แท็บถูกซ่อน
+  // จึงต้องขอคืนเมื่อผู้ใช้กลับมาดู
+  useEffect(() => {
+    if (!exporting) return;
+    let lock = null;
+    let stopped = false;
+    const acquire = async () => {
+      // ขอได้เฉพาะตอนแท็บโชว์อยู่ (สเปกบังคับ) — เบราว์เซอร์ไม่รองรับ/ผู้ใช้ปฏิเสธก็ข้ามไป
+      if (lock || document.visibilityState !== 'visible') return;
+      try {
+        const l = (await navigator.wakeLock?.request('screen')) || null;
+        if (stopped) l?.release?.().catch(() => {});
+        else lock = l;
+      } catch { /* ไม่มี wake lock ก็ export ได้ แค่เสี่ยงจอดับ */ }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') acquire(); };
+    acquire();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      lock?.release?.().catch(() => {});
+    };
+  }, [exporting]);
+
+  // รอเฟรมเฉพาะตอนแท็บโชว์อยู่ (เผื่อ ResizeObserver วัดความสูงซ้ำ) — ถ้าถูกซ่อนก็ไม่มีเฟรมให้รอ ข้ามเลย
+  const waitFrameIfVisible = () => new Promise(resolve => {
+    if (document.visibilityState !== 'visible') return resolve();
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    requestAnimationFrame(() => requestAnimationFrame(finish));
+    setTimeout(finish, 300); // กันเหนียวเผื่อผู้ใช้สลับแท็บระหว่างรอ
+  });
+
+  // ── แท็บพรีวิว PDF ────────────────────────────────────────────────────────
+  // เปิดแท็บว่างพร้อมหน้ารอ ต้องเรียกทันทีที่กดปุ่ม (ก่อน await ตัวแรก)
+  // ไม่งั้น popup blocker ตัดทิ้ง เพราะกว่า PDF จะสร้างเสร็จ user gesture ก็หมดอายุแล้ว
+  const openPendingPdfTab = () => {
+    const win = window.open('', '_blank');
+    if (!win) return null;
+    win.document.write(`<!DOCTYPE html>
+<html lang="th"><head><meta charset="utf-8"><title>กำลังสร้าง PDF...</title>
+<style>
+  html,body{height:100%;margin:0;background:#1a102a;color:#fff;
+    font-family:'Prompt','Noto Sans Thai',system-ui,sans-serif;}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;}
+  .ring{width:46px;height:46px;border-radius:50%;border:4px solid rgba(255,255,255,.18);
+    border-top-color:#F5C518;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  p{margin:0;font-size:16px}
+  #pct{font-size:14px;opacity:.7;font-variant-numeric:tabular-nums}
+</style></head><body>
+<div class="ring"></div><p>กำลังสร้าง PDF...</p><p id="pct">0%</p>
+</body></html>`);
+    win.document.close();
+    return win;
+  };
+
+  const setPdfTabProgress = (win, pct) => {
+    try {
+      const el = win?.document?.getElementById('pct');
+      if (el) el.textContent = `${pct}%`;
+    } catch { /* แท็บถูกปิดไปแล้ว — ไม่ต้องทำอะไร */ }
+  };
+
+  // ส่ง PDF ที่สร้างเสร็จเข้าแท็บที่เปิดรอไว้ — ดูตัวอย่างก่อน แล้วค่อยกดเซฟ/พิมพ์จากตัวอ่าน PDF ของเบราว์เซอร์
+  const showPdfInTab = (win, doc, filename) => {
+    doc.setProperties({ title: filename.replace(/\.pdf$/i, '') });
+    const blob = doc.output('blob');
+    if (!win || win.closed) { // ผู้ใช้ปิดแท็บพรีวิวระหว่างรอ — เซฟเป็นไฟล์แทนดีกว่าทิ้งงานที่สร้างเสร็จแล้ว
+      saveAs(blob, filename);
+      showToast('แท็บพรีวิวถูกปิดไปแล้ว — บันทึกเป็นไฟล์แทน');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    win.location.replace(url);
+    // ปล่อย blob ทีหลัง — revoke เร็วกว่านี้แท็บพรีวิวจะโหลดไม่ทัน
+    setTimeout(() => URL.revokeObjectURL(url), 5 * 60 * 1000);
+  };
+
   // รอฟอนต์การ์ดให้พร้อมจริงก่อนแคปภาพ
   // document.fonts.ready รอเฉพาะไฟล์ที่ "กำลังโหลดอยู่" — ถ้ายังไม่มีอะไรบนจอใช้ Prompt มันจะ resolve ทันที
   // แล้วภาพที่ได้จะเป็นฟอนต์ระบบ. อีกอย่าง Google Fonts แยกไฟล์ตาม unicode-range ต้องสั่งด้วยตัวอักษรไทย
@@ -721,18 +808,22 @@ export default function ReportPage() {
     document.body.appendChild(container);
 
     const root = createRoot(container);
-    root.render(
-      <StudentCard
-        student={student}
-        settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])}
-        yearName={yearName}
-        quoteApproved={approvedQuotes.has(student.student_code)}
-      />
-    );
-
-    // รอ paint จริง (แทน delay ตายตัว 1 วินาที/คน) — รูปกับฟอนต์ถูกโหลดไว้ก่อนแล้ว
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    await new Promise(r => setTimeout(r, 50));
+    // flushSync = commit + useLayoutEffect (ตัววัดความสูงย่อรายชื่อมหาวิทยาลัย) จบทันทีในบรรทัดนี้
+    // เดิมรอ 2 เฟรม + 50ms ซึ่งค้างถาวรเมื่อแท็บถูกซ่อน/จอดับ (เบราว์เซอร์ไม่ยิงเฟรมให้แท็บที่ไม่ได้โชว์)
+    flushSync(() => {
+      root.render(
+        <StudentCard
+          student={student}
+          settings={mergeStudentSettings(settings, overrides[normCode(student.student_code)])}
+          yearName={yearName}
+          quoteApproved={approvedQuotes.has(student.student_code)}
+        />
+      );
+    });
+    // บังคับให้เบราว์เซอร์คำนวณ layout จริง — modern-screenshot อ่านค่าจาก computed style ไม่ได้รอ paint
+    void container.offsetHeight;
+    // ถ้าแท็บยังโชว์อยู่ก็รอเฟรมเหมือนเดิม เผื่อ ResizeObserver วัดซ้ำ; ถ้าถูกซ่อนจะข้ามให้ทันที
+    await waitFrameIfVisible();
 
     try {
       // modern-screenshot ใช้เทคนิค SVG foreignObject = เบราว์เซอร์เรนเดอร์เลย์เอาต์เองจริงๆ
@@ -784,9 +875,15 @@ export default function ReportPage() {
     }
   };
 
-  // ── เซฟ PDF คนเดียว (คนที่พรีวิว) — จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่าน print dialog / ไม่โดนย่อ A4 ──
+  // ── พรีวิว PDF คนเดียว (คนที่พรีวิว) — จัตุรัส 1080×1080 ไม่ผ่าน print dialog / ไม่โดนย่อ A4 ──
+  // เปิดในแท็บใหม่ให้ดูก่อน ยังไม่สร้างไฟล์ — จะเซฟหรือพิมพ์ค่อยกดจากตัวอ่าน PDF ของเบราว์เซอร์
   const exportOnePdf = async () => {
     if (!previewStudent) return;
+    const win = openPendingPdfTab();
+    if (!win) {
+      showToast('เบราว์เซอร์บล็อกการเปิดแท็บใหม่ — อนุญาต popup ก่อน', 'error');
+      return;
+    }
     setExporting(true);
     setExportProgress(0);
     try {
@@ -801,11 +898,12 @@ export default function ReportPage() {
       const img = canvas.toDataURL('image/png');
       const doc = new jsPDF({ orientation: 'portrait', unit: 'px', format: [1080, 1080], compress: true });
       addFittedImage(doc, img, 'PNG', canvas.width, canvas.height);
-      doc.save(`${previewStudent.student_code}_${previewStudent.first_name}_${previewStudent.last_name}.pdf`);
       setExportProgress(100);
+      showPdfInTab(win, doc, `${previewStudent.student_code}_${previewStudent.first_name}_${previewStudent.last_name}.pdf`);
     } catch (err) {
-      console.error('เซฟ PDF คนนี้ไม่สำเร็จ', err);
-      showToast('เซฟ PDF คนนี้ไม่สำเร็จ', 'error');
+      console.error('สร้างพรีวิว PDF คนนี้ไม่สำเร็จ', err);
+      showToast('สร้างพรีวิว PDF คนนี้ไม่สำเร็จ', 'error');
+      if (!win.closed) win.close(); // ไม่มีอะไรให้ดู อย่าทิ้งแท็บหมุนค้างไว้
     } finally {
       setExporting(false);
       setExportProgress(0);
@@ -938,11 +1036,16 @@ export default function ReportPage() {
     }
   };
 
-  // ── Export PDF ──
-  // สร้าง PDF ตรงๆ ฝั่ง client (html2canvas → jsPDF) ทีละใบ — ไม่พึ่ง print dialog ของ browser
-  // ที่ค้างเมื่อมีนักเรียนหลักร้อยคน
+  // ── พรีวิว PDF ทุกคน ──
+  // สร้าง PDF ตรงๆ ฝั่ง client ทีละใบ — ไม่พึ่ง print dialog ของ browser ที่ค้างเมื่อมีนักเรียนหลักร้อยคน
+  // เสร็จแล้วเปิดในแท็บใหม่ให้ตรวจก่อน ยังไม่สร้างไฟล์
   const exportPdf = async () => {
     if (students.length === 0) return;
+    const win = openPendingPdfTab();
+    if (!win) {
+      showToast('เบราว์เซอร์บล็อกการเปิดแท็บใหม่ — อนุญาต popup ก่อน', 'error');
+      return;
+    }
     setExporting(true);
     setExportProgress(0);
     try {
@@ -969,17 +1072,21 @@ export default function ReportPage() {
         } catch (err) {
           console.error('Capture failed:', student.student_code, err);
         }
-        setExportProgress(Math.round(((i + 1) / students.length) * 100));
+        const pct = Math.round(((i + 1) / students.length) * 100);
+        setExportProgress(pct);
+        setPdfTabProgress(win, pct); // โชว์ความคืบหน้าในแท็บพรีวิวด้วย เพราะแท็บนั้นคือแท็บที่ผู้ใช้มองอยู่
       }
 
       if (added === 0) {
         showToast('ไม่สามารถสร้างหน้า PDF ได้', 'error');
+        if (!win.closed) win.close();
         return;
       }
-      doc.save(`gradtrack-report-${yearName}.pdf`);
+      showPdfInTab(win, doc, `gradtrack-report-${yearName}.pdf`);
     } catch (err) {
       console.error('Export PDF failed', err);
       showToast('สร้าง PDF ไม่สำเร็จ', 'error');
+      if (!win.closed) win.close();
     } finally {
       setExporting(false);
       setExportProgress(0);
@@ -1168,7 +1275,9 @@ export default function ReportPage() {
               style={{ width: `${exportProgress}%` }}
             />
           </div>
-          <p style={{ fontSize: 12, opacity: 0.6 }}>อย่าปิดหน้านี้จนกว่าจะเสร็จ</p>
+          <p style={{ fontSize: 12, opacity: 0.6 }}>
+            สลับไปทำอย่างอื่นได้ ระบบสร้างต่อจนเสร็จ — แค่อย่าปิดหน้านี้
+          </p>
         </div>
       )}
 
@@ -1829,7 +1938,7 @@ export default function ReportPage() {
                   {
                     label: 'PDF คนนี้', icon: 'file', variant: 'btn-outline',
                     onClick: exportOnePdf, disabled: exporting || !previewStudent,
-                    title: 'เซฟการ์ดคนนี้เป็น PDF จัตุรัส 1080×1080 โหลดตรงๆ ไม่ผ่านหน้าปริ้น ไม่โดนย่อ A4',
+                    title: 'เปิดพรีวิว PDF ของคนนี้ในแท็บใหม่ (จัตุรัส 1080×1080 ไม่โดนย่อ A4) — ยังไม่สร้างไฟล์ ถูกใจแล้วค่อยกดเซฟจากตัวอ่าน PDF',
                   },
                   {
                     label: 'PNG คนนี้', icon: 'image', variant: 'btn-outline',
@@ -1842,9 +1951,9 @@ export default function ReportPage() {
                     title: 'ดาวน์โหลดการ์ดทุกคนเป็นไฟล์ ZIP',
                   },
                   {
-                    label: 'Export PDF', icon: 'print', variant: 'btn-primary',
+                    label: 'PDF ทุกคน', icon: 'print', variant: 'btn-primary',
                     onClick: exportPdf, disabled: exporting || students.length === 0,
-                    title: 'รวมการ์ดทุกคนเป็นไฟล์ PDF เดียว',
+                    title: 'รวมการ์ดทุกคนเป็น PDF เดียว แล้วเปิดพรีวิวในแท็บใหม่ — ยังไม่สร้างไฟล์ ตรวจแล้วค่อยกดเซฟจากตัวอ่าน PDF',
                   },
                 ].map((b) => (
                   <button
