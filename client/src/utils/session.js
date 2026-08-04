@@ -17,6 +17,8 @@
 // จึงมีสองเข็ม: เข็มของแท็บนี้ กับเข็มที่บอกว่า "เพิ่งยืนยันว่ายังมี session ของ
 // SchoolOS อยู่จริง" · หมดเวลาก็ต่อเมื่อเงียบทั้งคู่ (ดู isIdleExpired)
 
+import { withBase } from './withBase';
+
 // ตั้งเป็นนาทีไว้ตัวเดียว แล้วให้ข้อความที่หน้า login อ้างอิงค่านี้ — เคยมีปัญหา
 // แก้ตัวเลขที่นี่แล้วลืมแก้ข้อความ ผู้ใช้เลยอ่านเจอเวลาที่ไม่ตรงกับของจริง
 //
@@ -232,6 +234,28 @@ export function clearStoredSession(reason) {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
   clearActivity();
+}
+
+/**
+ * จบ session แล้วพาไปหน้า login **ของ GradTrack เอง**
+ *
+ * ปลายทางคือหน้า login ของเรา ไม่ใช่ portal ของ SchoolOS — คนที่เพิ่งหมดเวลาต้องได้
+ * เห็นข้อความบอกเหตุผล (TIMEOUT_NOTICES) แล้วเข้าใหม่ได้ทันทีในระบบที่เขากำลังใช้อยู่
+ * การเด้งออกไป portal ทำให้เขาไปโผล่หน้า login ของ SchoolOS โดยไม่มีคำอธิบาย
+ * และต้องเดินกลับเข้ามาที่ /grad เองอีกรอบ · portal สงวนไว้ให้ปุ่ม "ออกจากระบบ"
+ * ที่ตั้งใจออกจากทั้งแพลตฟอร์มเท่านั้น (ดู leaveToPortal ใน utils/sso.js)
+ *
+ * โหลดหน้าใหม่ทั้งหน้าเสมอ ห้ามใช้ router — หน้าที่ค้างอยู่ถูก render ไว้ให้คนเก่า
+ * การ navigate ฝั่ง client จะ re-render จาก cache ก้อนเดิม ซึ่งบนเครื่องส่วนกลาง
+ * แปลว่าคนถัดไปอาจเห็นข้อมูลของคนก่อนหน้าค้างอยู่
+ */
+export function bounceToLogin(reason) {
+  clearStoredSession(reason);
+  const target = withBase('/login');
+  // อยู่หน้า login อยู่แล้ว → reload เพื่อให้ข้อความเหตุผลรอบนี้ถูกอ่านใหม่
+  // (assign ไป path เดิมบางเบราว์เซอร์ไม่โหลดหน้าใหม่ให้)
+  if (window.location.pathname === target) window.location.reload();
+  else window.location.assign(target);
 }
 
 // ─── สะพานระหว่าง axios interceptor กับ AuthContext ──────────────────────────

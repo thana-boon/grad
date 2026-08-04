@@ -5,6 +5,7 @@ import {
   LOGOUT_REASONS,
   TOKEN_KEY,
   USER_KEY,
+  bounceToLogin,
   clearActivity,
   clearStoredSession,
   getTokenClaims,
@@ -18,6 +19,7 @@ import {
   setLogoutReason,
   setSessionExpiredHandler,
 } from '../utils/session';
+import { withBase } from '../utils/withBase';
 import {
   blockSilentLogin,
   clearSilentLoginBlock,
@@ -96,15 +98,18 @@ export function AuthProvider({ children }) {
   const renewing = useRef(false); // กันขอต่ออายุซ้อนกันตอน interval มาชนกับ request ที่ยังค้าง
   const askingPlatform = useRef(false); // กันถาม SchoolOS ซ้อนกันตอนนาฬิกา idle หมดแล้ว
 
-  // session จบระหว่างใช้งาน → ล้างของเราแล้วส่งผู้ใช้กลับไปหน้า portal ของ SchoolOS
+  // session จบระหว่างใช้งาน (หมดเวลา / token หมดอายุ / โดน 401) → ล้างของเราแล้วพาไป
+  // หน้า login **ของ GradTrack เอง** พร้อมเหตุผล ไม่ใช่เด้งออกไป portal ของ SchoolOS
   //
-  // ส่งออกเฉพาะ "จังหวะที่เพิ่งจบ" เท่านั้น ไม่ใช่ทุกครั้งที่ไม่มี session —
-  // ถ้าหน้า login เด้งออกเองด้วยจะวนไม่รู้จบระหว่าง portal กับ GradTrack และบัญชี
-  // local (ทางเข้าสำรองตอน SchoolOS ล่ม) จะไม่มีทางเข้าถึงฟอร์มได้เลย
-  const clearSession = useCallback((reason, { toPortal = true } = {}) => {
-    clearStoredSession(reason);
+  // เคยเด้งไป portal แล้วผู้ใช้ไปโผล่หน้า login ของ SchoolOS โดยไม่มีคำอธิบายว่าเกิดอะไรขึ้น
+  // แล้วต้องเดินกลับเข้ามาที่ /grad เองอีกรอบ — ทั้งที่หน้า login ของเราเตรียมข้อความ
+  // "หมดเวลาใช้งาน…" ไว้พร้อมแล้ว และ silent SSO ที่นั่นก็พาเข้าใหม่ให้เองได้ถ้ายัง
+  // ล็อกอิน SchoolOS อยู่ · ออกไป portal เฉพาะตอน "กดออกจากระบบ" ซึ่งตั้งใจออกทั้งแพลตฟอร์ม
+  const clearSession = useCallback((reason, { redirect = true } = {}) => {
+    // bounceToLogin ล้าง storage ให้ในตัวแล้วโหลดหน้าใหม่ทั้งหน้า
+    if (redirect) bounceToLogin(reason);
+    else clearStoredSession(reason);
     setSession({ user: null, token: null });
-    if (toPortal) leaveToPortal();
   }, []);
 
   // ต่ออายุแล้วได้ token ใบใหม่ — เปลี่ยนเฉพาะ token ห้ามใช้ login() แทน
@@ -127,8 +132,8 @@ export function AuthProvider({ children }) {
   // จบด้วยการพาไป portal ของ SchoolOS ในการ navigate ครั้งเดียวกัน
   const logout = useCallback(() => {
     blockSilentLogin();
-    clearSession(null, { toPortal: false });
-    leaveToPortal({ logoutFirst: true });
+    clearSession(null, { redirect: false });
+    leaveToPortal();
   }, [clearSession]);
 
   // ── ให้ axios interceptor เรียกได้ตอน server ตอบ 401 ───────────────────────
@@ -248,12 +253,15 @@ export function AuthProvider({ children }) {
     document.addEventListener('visibilitychange', onVisible);
 
     // อีกแท็บล็อกเอาต์/หมดเวลา → แท็บนี้หลุดตาม (ไม่งั้นแท็บที่เหลือยังใช้ได้ต่อ)
-    // แล้วออกไป portal เหมือนกัน — แท็บที่ค้างหน้า dashboard ไว้เฉย ๆ ทั้งที่หมด
+    // แล้วไปรออยู่ที่หน้า login ของเรา — แท็บที่ค้างหน้า dashboard ไว้เฉย ๆ ทั้งที่หมด
     // สิทธิ์แล้วคือสิ่งที่เรากำลังพยายามกำจัดบนเครื่องส่วนกลาง
+    //
+    // ห้ามล้าง storage ซ้ำ (แท็บโน้นล้างไปแล้ว และเขียนเหตุผลไว้ให้แล้ว) — เรียก
+    // clearStoredSession ตรงนี้จะทับเหตุผลนั้นด้วย undefined แล้วข้อความหายไป
     const onStorage = (e) => {
       if (e.key === TOKEN_KEY && !e.newValue) {
         setSession({ user: null, token: null });
-        leaveToPortal();
+        window.location.assign(withBase('/login'));
       }
     };
     window.addEventListener('storage', onStorage);

@@ -137,25 +137,25 @@ export async function trySilentLogin() {
 }
 
 /**
- * พาออกไปหน้า portal ของ SchoolOS เมื่อ session ของเราจบ
+ * ออกจาก SchoolOS แล้วไปจบที่หน้า portal — ใช้กับปุ่ม "ออกจากระบบ" **เท่านั้น**
  *
- * ⚠️ เรียกเฉพาะ "จังหวะที่ session เพิ่งจบ" เท่านั้น ห้ามเรียกตอน render หน้า login
- * ไม่งั้นจะวนไม่รู้จบ: portal → กดเข้า GradTrack → หน้า login → เด้งกลับ portal → ...
- * หน้า login ต้องยังเปิดดูได้เสมอ เพราะเป็นทางเข้าเดียวของบัญชี local ตอน SchoolOS ล่ม
+ * ⚠️ ห้ามใช้กับ session ที่จบเอง (หมดเวลา / token หมดอายุ / 401) — พวกนั้นต้องไปหน้า
+ * login ของ GradTrack พร้อมข้อความบอกเหตุผล (ดู bounceToLogin ใน utils/session.js)
+ * ไม่งั้นผู้ใช้จะไปโผล่หน้า login ของ SchoolOS แบบไม่รู้ว่าเกิดอะไรขึ้น แล้วต้องเดินกลับ
+ * เข้ามาที่ /grad เองอีกรอบ · และห้ามเรียกตอน render หน้า login เด็ดขาด ไม่งั้นวนไม่รู้จบ
+ * portal → กดเข้า GradTrack → หน้า login → เด้งกลับ portal → ...
  *
- * @param logoutFirst true = ออกจาก SchoolOS ระหว่างทางด้วย (ใช้ตอนกดปุ่มออกจากระบบ)
- *   ทำในการ navigate ครั้งเดียวผ่าน ?next= เชื่อถือได้กว่ายิง POST ทิ้งไว้แล้วรีบเปลี่ยนหน้า
- *   ซึ่งเบราว์เซอร์อาจตัดทิ้งกลางคันจนออกจากระบบไม่สำเร็จ
+ * ออกจาก SchoolOS ด้วยการ navigate ไป /api/auth/logout?next= ครั้งเดียว เชื่อถือได้กว่า
+ * ยิง POST ทิ้งไว้แล้วรีบเปลี่ยนหน้า ซึ่งเบราว์เซอร์อาจตัดทิ้งกลางคันจนออกไม่สำเร็จ
  */
-export async function leaveToPortal({ logoutFirst = false } = {}) {
+export async function leaveToPortal() {
   let target = '/';
   try {
     const config = await loadConfig();
     const portal = config?.portalUrl || '/';
-    target =
-      logoutFirst && config?.enabled
-        ? usersUrl(config.usersBase, `/api/auth/logout?next=${encodeURIComponent(portal)}`)
-        : portal;
+    target = config?.enabled
+      ? usersUrl(config.usersBase, `/api/auth/logout?next=${encodeURIComponent(portal)}`)
+      : portal;
   } catch {
     /* อ่านค่าไม่ได้ → กลับหน้าแรกของโดเมนนี้ ดีกว่าค้างอยู่เฉย ๆ */
   }
@@ -188,6 +188,6 @@ export async function refreshSchoolOSSession() {
   }
 }
 
-// การออกจากระบบที่ SchoolOS ย้ายไปทำใน leaveToPortal({ logoutFirst: true })
-// ด้วยการ navigate ไป /api/auth/logout?next= ครั้งเดียว — เชื่อถือได้กว่ายิง POST
-// ทิ้งไว้แล้วรีบเปลี่ยนหน้า ซึ่งเบราว์เซอร์ยกเลิก request กลางคันได้
+// การออกจากระบบที่ SchoolOS ย้ายไปทำใน leaveToPortal() ด้วยการ navigate ไป
+// /api/auth/logout?next= ครั้งเดียว — เชื่อถือได้กว่ายิง POST ทิ้งไว้แล้วรีบเปลี่ยนหน้า
+// ซึ่งเบราว์เซอร์ยกเลิก request กลางคันได้

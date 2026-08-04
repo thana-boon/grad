@@ -18,7 +18,7 @@ import { useAuth } from '../context/AuthContext';
 import { withBase } from '../utils/withBase';
 import {
   LOGOUT_REASONS,
-  clearStoredSession,
+  bounceToLogin,
   getTokenClaims,
   markPlatformActivity,
   saveSession,
@@ -63,13 +63,10 @@ export default function SessionGuard() {
   useEffect(() => {
     if (!watching) return;
 
-    /** ล้าง session ของเราแล้วไปหน้า login แบบโหลดใหม่ทั้งหน้า */
-    const bounceToLogin = (reason) => {
+    /** ล้าง session ของเราแล้วไปหน้า login แบบโหลดใหม่ทั้งหน้า (ดู utils/session.js) */
+    const leaveToLogin = (reason) => {
       leaving.current = true;
-      clearStoredSession(reason);
-      // ห้ามใช้ router — หน้าที่ค้างอยู่ถูก render ไว้ให้คนเก่า การ navigate ฝั่ง client
-      // จะ re-render จาก cache ก้อนเดิม (ดู trap ข้อ 5 ในใบสั่งงาน)
-      window.location.assign(withBase('/login'));
+      bounceToLogin(reason);
     };
 
     const check = async () => {
@@ -100,7 +97,7 @@ export default function SessionGuard() {
         // ── ถึงตรงนี้ = ตัวตนไม่ตรงกับตอนที่รับช่วงมาแล้ว ────────────────────
         if (!live.valid) {
           // ออกจาก SchoolOS ไปแล้ว → session ของเราหมดความชอบธรรมตามไปด้วย
-          bounceToLogin(LOGOUT_REASONS.SSO_ENDED);
+          leaveToLogin(LOGOUT_REASONS.SSO_ENDED);
           return;
         }
 
@@ -108,7 +105,7 @@ export default function SessionGuard() {
         // ได้เลย ไม่ต้องให้พิมพ์อะไร
         if (switchedRecently()) {
           // เพิ่งสลับไปแล้วแต่ยังไม่ตรงอีก = กำลังจะวน ตัดจบที่หน้า login
-          bounceToLogin(LOGOUT_REASONS.SSO_ENDED);
+          leaveToLogin(LOGOUT_REASONS.SSO_ENDED);
           return;
         }
 
@@ -124,7 +121,7 @@ export default function SessionGuard() {
           // จบไปนานแล้ว / ไม่อยู่ในรายชื่อ) — เหตุผลนี้ต้องบอก ไม่งั้นเขาจะกรอกรหัสซ้ำ
           // อยู่นั่นแล้วงงว่าทำไมไม่เข้า · error อื่น (โค้ดหมดอายุ/429/ระบบสะดุด)
           // ไม่ได้แปลว่าไม่มีสิทธิ์ จึงใช้ข้อความกลาง ๆ แทน
-          bounceToLogin(
+          leaveToLogin(
             err?.response?.status === 403 ? LOGOUT_REASONS.SSO_DENIED : LOGOUT_REASONS.SSO_ENDED
           );
           return;
@@ -139,7 +136,7 @@ export default function SessionGuard() {
 
         // ขอโค้ดไม่สำเร็จ (ขอถี่เกิน/จังหวะไม่ดี) — ปล่อยหน้าของคนเก่าค้างไว้ให้คนใหม่
         // ไม่ได้ เพราะรู้แน่แล้วว่าคนหน้าเครื่องเปลี่ยนไปแล้ว จึงพากลับหน้า login
-        bounceToLogin(LOGOUT_REASONS.SSO_ENDED);
+        leaveToLogin(LOGOUT_REASONS.SSO_ENDED);
       } finally {
         busy.current = false;
       }
