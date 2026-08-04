@@ -231,6 +231,7 @@ async function rememberStudents(rows, yearId, yearBe) {
  * และแบบตัดศูนย์ ("2809") เพราะข้อมูลเก่าใน DB เก็บไว้คนละแบบกับที่ API ส่งมา
  *
  * เอาแถวของ "ปีล่าสุดที่เคยเห็น" ของแต่ละคน = ปีที่เรียนจบ สำหรับคนที่จบไปแล้ว
+ * — วัดจาก year_be ไม่ใช่ year_id ด้วยเหตุผลเดียวกับ byYearDesc (id ไม่เรียงตามปี)
  */
 async function lookupSnapshots(codes) {
   const keys = [
@@ -255,7 +256,9 @@ async function lookupSnapshots(codes) {
               class_level, class_room, number_in_room, status
          FROM student_snapshots
         WHERE student_code = ANY(?)
-        ORDER BY student_code, year_id DESC`,
+        ORDER BY student_code,
+                 (CASE WHEN year_be ~ '^[0-9]+$' THEN year_be::int END) DESC NULLS LAST,
+                 year_id DESC`,
       [keys]
     )
     .catch((e) => {
@@ -287,29 +290,69 @@ async function lookupSnapshots(codes) {
 }
 
 // ─── ปีการศึกษาที่เคยเห็น (แคชในตาราง academic_years) ────────────────────────
-/** id ปีการศึกษาเรียงใหม่ → เก่า (id ฝั่ง SchoolOS เพิ่มขึ้นตามปี) */
-async function cachedYearIds() {
+/** year_be เก็บเป็นข้อความ — อ่านเป็นเลข พ.ศ. ให้ได้ ไม่ได้ก็คืน null ไปตัดสินทีหลัง */
+const yearNum = (v) => {
+  const n = parseInt(String(v ?? '').trim(), 10);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * เรียงปีการศึกษาใหม่ → เก่า **ตามเลข พ.ศ.** ไม่ใช่ตาม id
+ *
+ * ห้ามเรียงด้วย id เด็ดขาด: id ฝั่ง SchoolOS คือลำดับที่ปีนั้นถูกสร้าง ไม่ใช่ลำดับ
+ * เวลาของปี ของจริงตอนนี้คือ id 1 = 2569 · id 2 = 2570 (ปีเปล่าที่สร้างรอไว้)
+ * · id 3 = 2568 (ปีเก่าที่ย้อนคีย์เข้าไปทีหลัง) — เรียงด้วย id เมื่อไหร่ ลำดับรุ่น
+ * กลับหัวทันที แล้วด่าน isRecentYear จะเตะรุ่นที่เพิ่งจบออกทั้งรุ่น
+ *
+ * ปีที่ year_be อ่านเป็นเลขไม่ได้ไปอยู่ท้ายสุด — ตัดสินลำดับจากมันไม่ได้
+ */
+function byYearDesc(a, b) {
+  const ay = yearNum(a.year_be);
+  const by = yearNum(b.year_be);
+  if (ay !== by) {
+    if (ay === null) return 1;
+    if (by === null) return -1;
+    return by - ay;
+  }
+  return Number(b.id) - Number(a.id);
+}
+
+/** ปีการศึกษาที่เคยเห็น เรียงใหม่ → เก่า */
+async function cachedYears() {
   const [rows] = await db
-    .query('SELECT id, is_current FROM academic_years ORDER BY id DESC')
+    .query('SELECT id, year_be, is_current FROM academic_years')
     .catch(() => [[]]);
   return rows
-    .map((r) => ({ id: Number(r.id), is_current: !!r.is_current }))
-    .filter((r) => Number.isFinite(r.id));
+    .map((r) => ({ id: Number(r.id), year_be: yearNum(r.year_be), is_current: !!r.is_current }))
+    .filter((r) => Number.isFinite(r.id))
+    .sort(byYearDesc);
 }
 
 /**
  * ปีนี้ยังนับเป็น "รุ่นล่าสุด" อยู่ไหม — ใช้ตัดสินว่าเด็กที่จบแล้วยังล็อกอินได้หรือยัง
  *
- * นับปี active กับปีที่เพิ่งผ่านไป รวมสองปี เพราะช่วงที่ต้องเปิดให้เข้าคือ
+ * นับปีปัจจุบันกับปีที่อยู่ก่อนหน้ามันหนึ่งปี เพราะช่วงที่ต้องเปิดให้เข้าคือ
  * มี.ค. (โรงเรียนทำจบ) ถึงราว มิ.ย. (ผล TCAS รอบ 4) ซึ่งคร่อมจุดที่ SchoolOS
- * สลับปี active พอดี — พอรุ่นถัดไปจบ ปีเก่าจะร่วงเป็นอันดับ 3 แล้วปิดเองอัตโนมัติ
- * โดยไม่ต้องมีใครไปตั้งวันหมดอายุทุกปี
+ * สลับปี active พอดี — พอรุ่นถัดไปจบ ปีเก่าจะร่วงออกเองอัตโนมัติ โดยไม่ต้องมีใคร
+ * ไปตั้งวันหมดอายุทุกปี
+ *
+ * ยึด "ปีปัจจุบัน" เป็นหมุดแล้วนับถอยหลังหนึ่งปี ไม่ใช่หยิบสองแถวบนสุดของรายการ:
+ * SchoolOS สร้างปีล่วงหน้าไว้ได้ (ตอนนี้มี 2570 ที่ยังไม่มีนักเรียนสักคน) ถ้านับ
+ * จากบนสุด ปีเปล่าพวกนั้นจะเบียดรุ่นที่เพิ่งจบตกขอบไปฟรี ๆ
  */
 async function isRecentYear(yearId) {
-  const year = Number(yearId);
-  if (!Number.isFinite(year)) return false;
-  const ids = (await cachedYearIds()).map((r) => r.id);
-  return ids.slice(0, 2).includes(year);
+  const target = Number(yearId);
+  if (!Number.isFinite(target)) return false;
+
+  const years = await cachedYears();
+  const current = years.find((y) => y.is_current);
+  if (!current) return false;
+  if (current.id === target) return true;
+
+  // list เรียงใหม่ → เก่าแล้ว ตัวแรกที่ พ.ศ. น้อยกว่าปีปัจจุบันคือปีก่อนหน้า
+  if (current.year_be === null) return false;
+  const previous = years.find((y) => y.year_be !== null && y.year_be < current.year_be);
+  return previous?.id === target;
 }
 
 // ─── students ────────────────────────────────────────────────────────────────
@@ -433,9 +476,15 @@ async function findStudentWithYear(rawCode, { yearDepth = YEAR_FALLBACK_DEPTH } 
   if (inActive) return inActive;
 
   // 2) ไล่ปีย้อนหลังจากที่แคชไว้ — เส้นทางของเด็กที่จบ/ลาออกไปแล้ว
+  //    ข้ามปีที่ใหม่กว่าปีปัจจุบันด้วย: SchoolOS สร้างปีล่วงหน้าไว้เปล่า ๆ ได้ ยิงไป
+  //    ก็ไม่มีทางเจอใคร มีแต่กิน quota 600 req/ชม.
   if (yearDepth > 0) {
-    const years = await cachedYearIds();
-    for (const y of years.filter((v) => !v.is_current).slice(0, yearDepth)) {
+    const years = await cachedYears();
+    const currentYearBe = years.find((y) => y.is_current)?.year_be ?? null;
+    const past = years.filter(
+      (v) => !v.is_current && (currentYearBe === null || (v.year_be ?? -Infinity) < currentYearBe)
+    );
+    for (const y of past.slice(0, yearDepth)) {
       const hit = await searchYear(y.id);
       if (hit) return hit;
     }
@@ -480,15 +529,19 @@ async function getAcademicYears() {
   }
 
   const [rows] = await db
-    .query('SELECT id, year_be, title, is_current FROM academic_years ORDER BY id DESC')
+    .query('SELECT id, year_be, title, is_current FROM academic_years')
     .catch(() => [[]]);
 
-  const years = rows.map((r) => ({
-    id: r.id,
-    year_be: r.year_be,
-    title: r.title,
-    is_active: r.is_current ? 1 : 0,
-  }));
+  // เรียงในโค้ดด้วย byYearDesc ตัวเดียวกับที่ด่านล็อกอินใช้ — หน้าที่ผู้ใช้เห็นกับ
+  // ลำดับที่ระบบใช้ตัดสินสิทธิ์ต้องเป็นอันเดียวกัน ไม่งั้นดีบักกันคนละภาพ
+  const years = rows
+    .map((r) => ({
+      id: r.id,
+      year_be: r.year_be,
+      title: r.title,
+      is_active: r.is_current ? 1 : 0,
+    }))
+    .sort(byYearDesc);
 
   return { current: current || years.find((y) => y.is_active) || years[0] || null, years };
 }

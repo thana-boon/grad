@@ -11,6 +11,11 @@
 // นับเวลาผ่าน localStorage ไม่ใช่ตัวแปรในหน่วยความจำ เพื่อให้
 //   · reload หน้าแล้วนาฬิกาไม่รีเซ็ต (ไม่งั้นเปิดค้างข้ามคืนแล้ว F5 ก็ยังอยู่)
 //   · ขยับในแท็บหนึ่ง = แท็บอื่นไม่หลุดตาม (ครูเปิดหลายแท็บพร้อมกันเป็นเรื่องปกติ)
+//
+// "ไม่ได้แตะ GradTrack" ยังไม่เท่ากับ "ลุกจากเครื่องไปแล้ว" — ครูมักเปิดระบบอื่นของ
+// SchoolOS ค้างไว้ด้วย session เดียวกัน แล้วทำงานอยู่ตรงนั้นทั้งชั่วโมง นาฬิกาตัวนี้
+// จึงมีสองเข็ม: เข็มของแท็บนี้ กับเข็มที่บอกว่า "เพิ่งยืนยันว่ายังมี session ของ
+// SchoolOS อยู่จริง" · หมดเวลาก็ต่อเมื่อเงียบทั้งคู่ (ดู isIdleExpired)
 
 // ตั้งเป็นนาทีไว้ตัวเดียว แล้วให้ข้อความที่หน้า login อ้างอิงค่านี้ — เคยมีปัญหา
 // แก้ตัวเลขที่นี่แล้วลืมแก้ข้อความ ผู้ใช้เลยอ่านเจอเวลาที่ไม่ตรงกับของจริง
@@ -25,6 +30,7 @@ export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60 * 1000;
 const ACTIVITY_WRITE_INTERVAL_MS = 30 * 1000;
 
 const LAST_ACTIVITY_KEY = 'lastActivity';
+const PLATFORM_ACTIVITY_KEY = 'lastPlatformActivity';
 const LOGOUT_REASON_KEY = 'logoutReason';
 const LOGOUT_AT_KEY = 'logoutAt';
 
@@ -40,13 +46,22 @@ export const LOGOUT_REASONS = {
   SSO_DENIED: 'sso_denied',     // เปลี่ยนคนที่ portal แล้ว แต่คนใหม่ไม่มีสิทธิ์ใช้ระบบนี้
 };
 
-// เหตุผลที่ "ต้องกรอกรหัสเอง" เท่านั้น — หลุดเพราะหมดเวลาแล้วให้ silent SSO พาเข้าใหม่ทันที
-// เท่ากับ idle timeout ไม่มีความหมายเลย และผู้ใช้จะไม่ทันเห็นด้วยซ้ำว่าโดนเตะเพราะอะไร
+// เหตุผลที่ "ต้องกรอกรหัสเอง" เท่านั้น
+//
+// EXPIRED อยู่ในนี้เพราะ token ที่ server ปฏิเสธ (401) แล้วให้ silent SSO พาเข้าใหม่ทันที
+// เสี่ยงวนเป็นวง: เข้าได้ → โดน 401 อีก → เข้าใหม่ → ...
+//
+// IDLE **ไม่**อยู่ในนี้แล้ว — silent SSO จะพาเข้าใหม่ได้ก็ต่อเมื่อ SchoolOS ยืนยันว่า
+// "ยังล็อกอินอยู่" ซึ่งแปลว่าผู้ใช้ยังทำงานอยู่ในระบบอื่นของแพลตฟอร์มด้วย session
+// เดียวกันมาตลอด (ดู isIdleExpired) การบังคับให้พิมพ์รหัสซ้ำในจังหวะนั้นไม่ได้เพิ่ม
+// ความปลอดภัยอะไร มีแต่ทำให้ครูที่ทำงานอยู่แท้ ๆ เจอ "ไม่ได้ใช้งานเกิน 15 นาที"
+// ทั้งที่ไม่จริง · ลุกจากเครื่องไปจริง ๆ session ฝั่งแพลตฟอร์มก็หมดตามไปด้วย
+// → ขอโค้ด handoff ไม่ได้ → เห็นฟอร์มพร้อมข้อความบอกเหตุผลเหมือนเดิม
 //
 // ส่วนเหตุผลฝั่ง SSO ไม่อยู่ในนี้: มันแปลว่า "ตัวตนที่ SchoolOS เปลี่ยนไปแล้ว"
 // การให้คนที่ล็อกอิน SchoolOS อยู่ตอนนี้กรอกรหัสเองซ้ำไม่ได้เพิ่มความปลอดภัยอะไร
 // มีแต่จะทำให้เครื่องส่วนกลางใช้ยากขึ้นเปล่า ๆ
-export const MANUAL_LOGIN_REASONS = [LOGOUT_REASONS.IDLE, LOGOUT_REASONS.EXPIRED];
+export const MANUAL_LOGIN_REASONS = [LOGOUT_REASONS.EXPIRED];
 
 // ─── บันทึกความเคลื่อนไหว ────────────────────────────────────────────────────
 
@@ -62,6 +77,31 @@ export function markActivity({ force = false } = {}) {
 export function clearActivity() {
   lastWrite = 0;
   localStorage.removeItem(LAST_ACTIVITY_KEY);
+  localStorage.removeItem(PLATFORM_ACTIVITY_KEY);
+}
+
+/**
+ * บันทึกว่า "เพิ่งยืนยันแล้วว่ายังมี session ของ SchoolOS ของคนเดิมอยู่จริง"
+ *
+ * ⚠️ เขียนได้จากที่เดียว: หลังถาม GET /api/auth/session แล้วได้คนเดิมกลับมา
+ * ห้ามให้ event ในหน้าเว็บเขียนเด็ดขาด ไม่งั้นจะกลายเป็นวงจรป้อนกลับที่ทำให้
+ * session ไม่มีวันหมดอายุ — แท็บที่เปิดค้างไว้ต่ออายุ session ของแพลตฟอร์ม
+ * (AuthContext) → แพลตฟอร์มยังสด → แท็บไม่หลุด → ต่ออายุอีก วนไปเรื่อย ๆ
+ * ด้วยเหตุผลเดียวกัน msSinceActivity() จึงต้องนับเฉพาะการขยับในแท็บนี้เสมอ
+ */
+export function markPlatformActivity() {
+  localStorage.setItem(PLATFORM_ACTIVITY_KEY, String(Date.now()));
+}
+
+export function clearPlatformActivity() {
+  localStorage.removeItem(PLATFORM_ACTIVITY_KEY);
+}
+
+/** ผ่านมากี่ ms ตั้งแต่ยืนยันครั้งล่าสุด · Infinity = ยังไม่เคยยืนยัน */
+export function msSincePlatformActivity() {
+  const last = Number(localStorage.getItem(PLATFORM_ACTIVITY_KEY));
+  if (!Number.isFinite(last) || last <= 0) return Infinity;
+  return Date.now() - last;
 }
 
 /**
@@ -74,12 +114,25 @@ export function msSinceActivity() {
   return Date.now() - last;
 }
 
+/**
+ * หมดเวลาจริงหรือยัง — ต้องเงียบทั้งสองเข็ม
+ *
+ * เข็มที่สอง (SchoolOS) กันอาการที่ผู้ใช้เจอบ่อยที่สุด: เปิด GradTrack ค้างไว้แล้วไป
+ * ทำงานในระบบอื่นของ SchoolOS ด้วย session เดียวกันเป็นชั่วโมง พอกลับมาก็เจอ
+ * "ไม่ได้ใช้งานเกิน 15 นาที" ทั้งที่ใช้งานแพลตฟอร์มอยู่ตลอด
+ *
+ * เข็มนี้เดินหน้าได้ก็ต่อเมื่อ **ถามแล้วได้คำยืนยัน** เท่านั้น (ดู markPlatformActivity)
+ * ถามไม่ได้/ไม่มีใครล็อกอินแล้ว = เข็มค้างอยู่ที่เดิม แล้วหมดเวลาตามกำหนดเดิม —
+ * ตั้งใจให้ผิดไปทางเตะออก ไม่ใช่ทางยืดให้ ตัว probe ที่พังจึงกลายเป็น session
+ * อมตะไม่ได้
+ */
 export function isIdleExpired() {
   const last = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
   // ยังไม่เคยบันทึก = เพิ่งอัปเดตมาจากเวอร์ชันก่อนหน้าที่ยังไม่มีฟีเจอร์นี้
   // → ปล่อยให้อายุ token เป็นตัวตัดสินแทน ไม่เตะออกทันทีโดยไม่มีเหตุ
   if (!Number.isFinite(last) || last <= 0) return false;
-  return Date.now() - last >= IDLE_TIMEOUT_MS;
+  if (Date.now() - last < IDLE_TIMEOUT_MS) return false;
+  return msSincePlatformActivity() >= IDLE_TIMEOUT_MS;
 }
 
 // ─── อ่านวันหมดอายุจาก JWT ───────────────────────────────────────────────────
@@ -169,6 +222,9 @@ export function saveSession(user, token) {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
   localStorage.setItem(TOKEN_KEY, token);
   markActivity({ force: true }); // เริ่มจับเวลา idle ตั้งแต่วินาทีที่ล็อกอิน
+  // คำยืนยันของ session ก่อนหน้าใช้กับคนใหม่ไม่ได้ — ล็อกอินด้วยรหัสผ่าน (ไม่มี session
+  // ฝั่งแพลตฟอร์มให้ยืนยันเลย) จะได้ไม่ยืมเข็มที่ค้างไว้จากผู้ใช้ SSO คนก่อน
+  clearPlatformActivity();
 }
 
 export function clearStoredSession(reason) {

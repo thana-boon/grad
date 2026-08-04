@@ -20,6 +20,7 @@ import {
   LOGOUT_REASONS,
   clearStoredSession,
   getTokenClaims,
+  markPlatformActivity,
   saveSession,
 } from '../utils/session';
 import { clearSilentLoginBlock, fetchLiveSession, trySilentLogin } from '../utils/sso';
@@ -85,6 +86,11 @@ export default function SessionGuard() {
 
         // คนเดิม — sub กับ code เทียบได้ทั้งคู่ เผื่อ SchoolOS ส่งรหัสมาคนละฟิลด์
         if (live.valid && (live.sub === ssoSub || live.code === ssoSub)) {
+          // คำถามนี้ถูกถามอยู่แล้วทุก 60 วิ — บอกนาฬิกา idle ไปด้วยเลยว่ายังมี session
+          // ของคนเดิมอยู่จริง เพื่อไม่ให้เตะคนที่กำลังทำงานในระบบอื่นของ SchoolOS อยู่
+          // (ดู isIdleExpired ใน utils/session.js) · ไม่ได้ต่ออายุ idle window ของ
+          // SchoolOS จึงไม่เกิดวงจรที่ทำให้ session ทั้งสองใบไม่มีวันหมดอายุ
+          markPlatformActivity();
           // ผ่านแล้ว = ไม่ได้อยู่ในลูป ปลดธงกันลูปทิ้ง ไม่งั้นการสลับคนครั้งถัดไป
           // ภายใน 30 วิ (เครื่องส่วนกลางที่คนต่อคิวกัน) จะถูกกันไปหน้า login เปล่า ๆ
           sessionStorage.removeItem(SWITCH_KEY);

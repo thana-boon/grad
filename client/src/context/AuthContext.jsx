@@ -7,10 +7,12 @@ import {
   USER_KEY,
   clearActivity,
   clearStoredSession,
+  getTokenClaims,
   getTokenExpiry,
   isIdleExpired,
   isTokenExpired,
   markActivity,
+  markPlatformActivity,
   msSinceActivity,
   saveSession,
   setLogoutReason,
@@ -19,6 +21,7 @@ import {
 import {
   blockSilentLogin,
   clearSilentLoginBlock,
+  fetchLiveSession,
   leaveToPortal,
   refreshSchoolOSSession,
 } from '../utils/sso';
@@ -91,6 +94,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(loadSession);
   const { user, token } = session;
   const renewing = useRef(false); // กันขอต่ออายุซ้อนกันตอน interval มาชนกับ request ที่ยังค้าง
+  const askingPlatform = useRef(false); // กันถาม SchoolOS ซ้อนกันตอนนาฬิกา idle หมดแล้ว
 
   // session จบระหว่างใช้งาน → ล้างของเราแล้วส่งผู้ใช้กลับไปหน้า portal ของ SchoolOS
   //
@@ -144,15 +148,52 @@ export function AuthProvider({ children }) {
       window.addEventListener(evt, onActivity, { passive: true, capture: true });
     }
 
+    // ── นาฬิกา idle หมดแล้ว: ถามแพลตฟอร์มก่อนหนึ่งครั้งแล้วค่อยตัดสิน ────────────
+    //
+    // "ไม่ได้แตะแท็บนี้ 15 นาที" ≠ "ลุกจากเครื่องไปแล้ว" — ครูมักเปิด GradTrack ค้างไว้
+    // แล้วไปทำงานในระบบอื่นของ SchoolOS ด้วย session เดียวกัน อาการที่ผู้ใช้เจอคือ
+    // กลับมาแล้วเจอ "ไม่ได้ใช้งานเกิน 15 นาที" ทั้งที่ใช้งานแพลตฟอร์มอยู่ตลอด
+    //
+    // ยืดเวลาให้เฉพาะตอนได้ "คำยืนยันว่าเป็นคนเดิมและยังล็อกอินอยู่" เท่านั้น:
+    //   · ไม่มีใครล็อกอินแล้ว / เป็นคนอื่น / ถามไม่ได้ (null) → เตะตามกำหนดเดิม
+    //     ตั้งใจให้ผิดไปทางเตะออก ไม่งั้น probe ที่พังจะกลายเป็น session อมตะ
+    //   · session ที่ไม่ได้มาทาง SSO (บัญชี local / กรอกรหัสผ่านเอง) ไม่มีอะไรให้ถาม
+    //     → เตะทันทีเหมือนเดิม ห้ามเอา session ของคนอื่นบนเบราว์เซอร์นี้มาต่ออายุให้
+    //
+    // ยืนยันสำเร็จแล้วเข็มฝั่งแพลตฟอร์มเดินหน้าไปอีก 1 ช่วง idle จึงถามอย่างมากครั้งเดียว
+    // ต่อหนึ่งช่วง ไม่ใช่ทุก 15 วิ (และถ้า session ฝั่ง SchoolOS ตายก่อนหน้านั้น
+    // SessionGuard จะเป็นคนเตะเองภายใน 60 วิอยู่แล้ว)
+    const { via, ssoSub } = getTokenClaims(token);
+
+    const decideIdle = async () => {
+      if (via !== 'sso' || !ssoSub) {
+        clearSession(LOGOUT_REASONS.IDLE);
+        return;
+      }
+      if (askingPlatform.current) return;
+      askingPlatform.current = true;
+      try {
+        const live = await fetchLiveSession();
+        if (live?.valid && (live.sub === ssoSub || live.code === ssoSub)) {
+          markPlatformActivity();
+          return;
+        }
+        clearSession(LOGOUT_REASONS.IDLE);
+      } finally {
+        askingPlatform.current = false;
+      }
+    };
+
     // effect นี้ผูกกับ token อยู่แล้ว (อยู่ใน deps) → closure เห็นค่าล่าสุดเสมอ
-    // คืน true = ยังใช้งานต่อได้
+    // คืน true = ยังใช้งานต่อได้ · idle หมดแล้วคืน false ทันทีทั้งที่ยังรอคำตอบอยู่
+    // เพื่อไม่ให้รอบนี้ไปต่ออายุอะไรก่อนรู้ผล
     const check = () => {
       if (isTokenExpired(token)) {
         clearSession(LOGOUT_REASONS.EXPIRED);
         return false;
       }
       if (isIdleExpired()) {
-        clearSession(LOGOUT_REASONS.IDLE);
+        decideIdle();
         return false;
       }
       return true;
