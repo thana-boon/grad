@@ -848,10 +848,22 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
       const errors = [];
       const warnings = [];
 
+      // หัวตารางจากระบบต้นทางเปลี่ยนรูปได้เรื่อย ๆ (stu_id · stuID · Stu ID)
+      // เทียบแบบตัดตัวพิมพ์และตัวคั่นทิ้ง จะได้ไม่ต้องไล่เติม alias ทุกครั้งที่เขาเปลี่ยน
+      // — ครั้งก่อนคอลัมน์ชื่อ stu_id พอกลายเป็น stuID ทั้งไฟล์ถูกข้ามเงียบ ๆ ทั้ง 396 แถว
+      const normKey = (k) => String(k).toLowerCase().replace(/[\s_\-.]/g, '');
+
+      const normalizeRow = (row) => {
+        const out = {};
+        for (const [k, v] of Object.entries(row)) out[normKey(k)] = v;
+        return out;
+      };
+
       const pick = (obj, keys) => {
         for (const key of keys) {
-          if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] != null && String(obj[key]).trim() !== '') {
-            return obj[key];
+          const k = normKey(key);
+          if (Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null && String(obj[k]).trim() !== '') {
+            return obj[k];
           }
         }
         return null;
@@ -883,13 +895,21 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
         return null;
       };
 
-      for (const row of rows) {
+      // แถวที่ 1 คือหัวตาราง — ผู้ใช้เปิดไฟล์แล้วนับตามนี้ได้เลย
+      const rowLabel = (i) => `แถวที่ ${i + 2}`;
+
+      for (const [rowIndex, rawRow] of rows.entries()) {
+        const row = normalizeRow(rawRow);
         try {
           // student code - supports many column aliases
           const rawCode = String(
             pick(row, ['stu_id', 'student_id', 'student_code', 'เลขประจำตัว', 'รหัสนักเรียน']) || ''
           ).trim();
-          if (!rawCode) { skipped++; continue; }
+          if (!rawCode) {
+            skipped++;
+            errors.push(`${rowLabel(rowIndex)}: ไม่มีรหัสนักเรียน`);
+            continue;
+          }
           const paddedCode = rawCode.padStart(5, '0');
 
           // Verify student exists in active year (จาก Map ที่ดึงจาก Student API)
@@ -933,8 +953,16 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
             XLSX
           );
 
-          if (!uniName) { skipped++; continue; }
-          if (!progName) { skipped++; continue; }
+          if (!uniName) {
+            skipped++;
+            errors.push(`รหัส ${rawCode}: ไม่มีชื่อมหาวิทยาลัย`);
+            continue;
+          }
+          if (!progName) {
+            skipped++;
+            errors.push(`รหัส ${rawCode}: ไม่มีชื่อหลักสูตร/สาขา`);
+            continue;
+          }
 
           // Find university
           const [unis] = await db.query(
@@ -1029,6 +1057,12 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
           const fallbackCode = pick(row, ['stu_id', 'student_id', 'student_code', 'เลขประจำตัว', 'รหัสนักเรียน']) || '-';
           errors.push(`รหัส ${fallbackCode}: ${rowErr.message}`);
         }
+      }
+
+      // ไม่ได้อะไรเลยสักแถว = มักเป็นเพราะหัวตารางคนละชุดกับที่รองรับ ไม่ใช่ข้อมูลผิดรายแถว
+      // บอกหัวตารางที่อ่านได้ไปด้วย จะได้เทียบเองได้ทันทีโดยไม่ต้องเปิด log ฝั่งเซิร์ฟเวอร์
+      if (imported === 0 && rows.length > 0) {
+        errors.unshift(`หัวตารางที่อ่านได้จากไฟล์: ${Object.keys(rows[0]).join(', ')}`);
       }
 
       logger.info('Import admissions', { total: rows.length, imported, skipped, warnings: warnings.length });

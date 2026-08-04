@@ -777,11 +777,25 @@ export default function AdmissionStatusPage() {
         <div className="modal-box max-w-md">
           {importResult?.ok ? (
             <>
+              {/* อ่านไฟล์ผ่าน ≠ ได้ข้อมูล — ถ้าไม่เข้าสักแถวต้องไม่ขึ้นเครื่องหมายถูกสีเขียว */}
               <div className="flex items-center gap-3">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
-                  <Icon name="checkCircle" size={20} />
-                </span>
-                <h3 className="text-base font-semibold">นำเข้าข้อมูลสำเร็จ</h3>
+                {importResult.imported > 0 ? (
+                  <>
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-success/10 text-success">
+                      <Icon name="checkCircle" size={20} />
+                    </span>
+                    <h3 className="text-base font-semibold">นำเข้าข้อมูลสำเร็จ</h3>
+                  </>
+                ) : (
+                  <>
+                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#F5C518]/15 text-[#8a6a00]">
+                      <Icon name="warning" size={20} />
+                    </span>
+                    <h3 className="text-base font-semibold text-[#8a6a00]">
+                      ไม่มีรายการถูกนำเข้า
+                    </h3>
+                  </>
+                )}
               </div>
 
               <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
