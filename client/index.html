@@ -13,6 +13,9 @@
          crossorigin จำเป็นสำหรับหน้า Report: ให้ modern-screenshot อ่าน @font-face แล้วฝังฟอนต์ลงภาพ export ได้
          (หน้า print/export ยัง @import Prompt ของตัวเองไว้ เพราะเลย์เอาต์ถูกจูนกับฟอนต์นั้น) -->
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
+    <!-- Prompt = ฟอนต์ของการ์ดรายงานผล (StudentCard) — ต้องโหลดในหน้าแอปด้วย ไม่ใช่เฉพาะหน้า print/แท็บใหม่
+         ไม่งั้นพรีวิว/โหมดลากวาง/ภาพที่ export จะตกไปใช้ฟอนต์ระบบ ตัวใหญ่กว่าเดิมจนเลย์เอาต์ล้น -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;700&family=Noto+Sans+Thai:wght@400;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
   </head>
   <body>
     <div id="root"></div>

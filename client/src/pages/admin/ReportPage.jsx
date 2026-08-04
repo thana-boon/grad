@@ -675,6 +675,22 @@ export default function ReportPage() {
   };
 
   // ── Export helpers ──
+  // รอฟอนต์การ์ดให้พร้อมจริงก่อนแคปภาพ
+  // document.fonts.ready รอเฉพาะไฟล์ที่ "กำลังโหลดอยู่" — ถ้ายังไม่มีอะไรบนจอใช้ Prompt มันจะ resolve ทันที
+  // แล้วภาพที่ได้จะเป็นฟอนต์ระบบ. อีกอย่าง Google Fonts แยกไฟล์ตาม unicode-range ต้องสั่งด้วยตัวอักษรไทย
+  // ไม่งั้นได้มาแต่ subset ละติน
+  const ensureCardFonts = async () => {
+    try {
+      await Promise.all([
+        document.fonts.load('400 22px Prompt', 'กขค ABC'),
+        document.fonts.load('700 22px Prompt', 'กขค ABC'),
+      ]);
+    } catch (err) {
+      console.warn('โหลดฟอนต์ Prompt ไม่สำเร็จ — ภาพที่ได้จะใช้ฟอนต์สำรอง', err);
+    }
+    await document.fonts.ready;
+  };
+
   // Preload all image URLs before html2canvas
   const preloadImages = async (urls) => {
     await Promise.all(
@@ -753,7 +769,7 @@ export default function ReportPage() {
         resolveMediaUrl(settings.background_image_url),
         resolveMediaUrl(settings.school_logo_url),
       ]);
-      await document.fonts.ready;
+      await ensureCardFonts();
       // scale 4 = คมชัดสุด (4320×4320) สำหรับดาวน์โหลดคนเดียว
       const canvas = await renderCardCanvas(previewStudent, 4);
       const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
@@ -778,7 +794,7 @@ export default function ReportPage() {
         resolveMediaUrl(settings.background_image_url),
         resolveMediaUrl(settings.school_logo_url),
       ]);
-      await document.fonts.ready;
+      await ensureCardFonts();
       const { jsPDF } = await import('jspdf');
       // scale 3 + PNG = คมชัด ไม่มี artifact สำหรับหน้าเดียว
       const canvas = await renderCardCanvas(previewStudent, 3);
@@ -801,6 +817,9 @@ export default function ReportPage() {
   const openInNewTab = async (list) => {
     const arr = Array.isArray(list) ? list : (previewStudent ? [previewStudent] : []);
     if (arr.length === 0) return;
+    // สเกลย่อรายชื่อมหาวิทยาลัยถูกคำนวณจากความสูงที่วัดในหน้านี้ แล้วฝังติดไปกับ HTML
+    // จึงต้องวัดตอนฟอนต์จริงพร้อมแล้ว ไม่งั้นได้ค่าจากฟอนต์สำรองซึ่งสูงกว่า
+    await ensureCardFonts();
     // เรนเดอร์การ์ดทุกคนเป็น HTML จริงก่อน แล้วคัด innerHTML ไปเปิดแท็บใหม่
     const container = document.createElement('div');
     container.style.cssText = 'position:fixed;left:-99999px;top:0;width:1080px;';
@@ -894,7 +913,7 @@ export default function ReportPage() {
         resolveMediaUrl(settings.background_image_url),
         resolveMediaUrl(settings.school_logo_url),
       ]);
-      await document.fonts.ready;
+      await ensureCardFonts();
 
       for (let i = 0; i < students.length; i++) {
         const student = students[i];
@@ -931,7 +950,7 @@ export default function ReportPage() {
         resolveMediaUrl(settings.background_image_url),
         resolveMediaUrl(settings.school_logo_url),
       ]);
-      await document.fonts.ready;
+      await ensureCardFonts();
 
       const { jsPDF } = await import('jspdf');
       const doc = new jsPDF({ orientation: 'portrait', unit: 'px', format: [1080, 1080], compress: true });
