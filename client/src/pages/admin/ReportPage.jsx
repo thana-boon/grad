@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { domToCanvas } from 'modern-screenshot';
 import JSZip from 'jszip';
@@ -11,13 +11,17 @@ import Icon from '../../components/ui/Icon';
 import { PageHeader } from '../../components/ui';
 
 // ─── Layout engine (left column only, 1 or 2 cols, up to 20 unis) ─────────────
-function getUniLayout(count) {
+// count = จำนวนกล่องมหาวิทยาลัย, rows = จำนวนบรรทัดคณะทั้งหมด (คนที่ยื่นหลายคณะในมหาวิทยาลัยเดียว
+// กินที่แนวตั้งเพิ่มด้วย ถ้านับแต่ count ขนาดที่เลือกจะใหญ่เกินจนล้นกล่อง)
+function getUniLayout(count, rows = count) {
   if (count === 0) return {};
-  if (count <= 4)  return { cols: 1, logo: 80,  uni: 22, fac: 16, prog: 13, pad: '14px 18px', gap: 12 };
-  if (count <= 8)  return { cols: 1, logo: 64,  uni: 18, fac: 14, prog: 11, pad: '10px 14px', gap: 9  };
-  if (count <= 10) return { cols: 1, logo: 52,  uni: 15, fac: 12, prog: 10, pad: '8px 12px',  gap: 7  };
+  // แถวคณะที่เกินมาถูกกว่ากล่องใหม่ (ไม่มีตรา/ขอบ/padding) — ตีเป็น ~0.6 กล่อง
+  const n = count + Math.max(0, rows - count) * 0.6;
+  if (n <= 4)  return { cols: 1, logo: 80,  uni: 22, fac: 16, prog: 13, pad: '14px 18px', gap: 12 };
+  if (n <= 6)  return { cols: 1, logo: 64,  uni: 18, fac: 14, prog: 11, pad: '10px 14px', gap: 9  };
+  if (n <= 10) return { cols: 1, logo: 52,  uni: 15, fac: 12, prog: 10, pad: '8px 12px',  gap: 7  };
   // >10: switch to 2 columns to use vertical space efficiently
-  if (count <= 14) return { cols: 2, logo: 44,  uni: 13, fac: 11, prog: 9,  pad: '7px 10px',  gap: 6  };
+  if (n <= 14) return { cols: 2, logo: 44,  uni: 13, fac: 11, prog: 9,  pad: '7px 10px',  gap: 6  };
   return           { cols: 2, logo: 36,  uni: 11, fac: 10, prog: 8,  pad: '5px 8px',   gap: 5  };
 }
 
@@ -106,7 +110,30 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
     return (a.university_name || '').localeCompare(b.university_name || '', 'th');
   });
 
-  const L = getUniLayout(grouped.length);
+  // จำนวนบรรทัดคณะทั้งหมด — ใช้เลือกขนาดเริ่มต้นให้ใกล้เคียงของจริงกว่าการนับแค่มหาวิทยาลัย
+  const rowCount = grouped.reduce((n, g) => n + Math.max(1, g.entries.length), 0);
+  const L = getUniLayout(grouped.length, rowCount);
+
+  // ── กันล้น: วัดความสูงจริงหลังเรนเดอร์ แล้วย่อทั้งบล็อกให้พอดี UNI_BOX ──
+  // ตารางขนาดด้านบนเป็นค่าประมาณ (ชื่อมหาวิทยาลัย/คณะยาวไม่เท่ากัน ตัดบรรทัดไม่เท่ากัน)
+  // จึงต้องมีตัววัดจริงปิดท้าย ไม่งั้นหัว-ท้ายรายการโดน overflow:hidden เฉือน
+  // เขียน transform ลง DOM ตรงๆ (ไม่ผ่าน state) — export เก็บภาพจาก DOM จริง จึงไม่ต้องรอ re-render
+  const uniInnerRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = uniInnerRef.current;
+    if (!el) return;
+    const measure = () => {
+      // transform: scale ไม่กระทบ layout box → ค่าที่วัดได้เป็นความสูงเต็มเสมอ (ไม่ย่อซ้ำ)
+      const h = el.scrollHeight;
+      el.style.transform = h > UNI_BOX.h ? `scale(${UNI_BOX.h / h})` : '';
+    };
+    measure();
+    // ฟอนต์ไทยโหลดช้ากว่า first paint → ความสูงเปลี่ยนทีหลัง ต้องวัดซ้ำ
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
   const textColor = settings.text_color || '#ffffff';
   const showFrame = settings.show_photo_frame === undefined ? true : !!settings.show_photo_frame;
   const photoZoom = (Number(settings.photo_scale) || 100) / 100;
@@ -302,11 +329,13 @@ export function StudentCard({ student, settings, yearName, quoteApproved = true 
       }}>
             {grouped.length > 0 && (
               <>
-                <div style={{
+                <div ref={uniInnerRef} style={{
                   display: 'grid',
                   gridTemplateColumns: `repeat(${L.cols}, 1fr)`,
                   gap: L.gap,
                   alignContent: 'center',
+                  // transform ถูกเซ็ตโดย useLayoutEffect ด้านบนเมื่อเนื้อหาสูงเกินกล่อง
+                  transformOrigin: 'center center',
                 }}>
                   {grouped.map(g => {
                     const isOne      = grouped.length === 1;
