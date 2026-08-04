@@ -1012,9 +1012,13 @@ router.post('/admin/import-admissions', verifyToken, adminOnly, (req, res) => {
             );
           }
           // ถ้าพบ program แต่ยังไม่มี group_field ให้ update จากข้อมูล Excel
+          //
+          // ค่าว่างต้องเป็น '' (single quote) เท่านั้น — Postgres อ่าน "" เป็น
+          // "ชื่อคอลัมน์ความยาวศูนย์" แล้วโยน zero-length delimited identifier
+          // ทิ้งทั้งแถวเข้า catch ด้านล่าง → ไฟล์ถูกข้ามเกลี้ยงโดยไม่มีใครเห็นว่าเป็น SQL พัง
           if (progs?.length && groupField) {
             await db.query(
-              'UPDATE programs SET group_field=? WHERE id=? AND (group_field IS NULL OR group_field="")',
+              "UPDATE programs SET group_field=? WHERE id=? AND (group_field IS NULL OR group_field='')",
               [groupField, progs[0].id]
             );
           }
