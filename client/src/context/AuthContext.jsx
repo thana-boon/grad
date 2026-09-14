@@ -26,6 +26,7 @@ import {
   clearSilentLoginBlock,
   fetchLiveSession,
   leaveToPortal,
+  platformExpiry,
   refreshSchoolOSSession,
 } from '../utils/sso';
 
@@ -36,9 +37,21 @@ const AuthContext = createContext(null);
 //  แต่การเทียบ timestamp ทุกรอบแบบนี้ให้ผลถูกเสมอ)
 const CHECK_INTERVAL_MS = 15 * 1000;
 
-// รอบต่ออายุ session ฝั่ง SchoolOS ระหว่างที่ยังนั่งใช้งาน GradTrack อยู่
-// ต้องถี่กว่า idle window ของ SchoolOS (SESSION_IDLE_MINUTES) พอสมควร ไม่งั้นต่อไม่ทัน
-const SOS_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+// ต่ออายุ session ฝั่ง SchoolOS เมื่อ "เส้นตายของมันเอง" เหลือน้อยกว่านี้
+//
+// เดิมตรงนี้เป็น setInterval ทุก 10 นาที ซึ่งเป็นนาฬิกาที่ไม่เกี่ยวอะไรเลยกับนาฬิกาที่ฆ่า
+// session จริง ๆ: มาถึงด้วย handoff ไม่ได้แปลว่าเพิ่งเริ่มนับ 15 นาที และทุกการโหลดหน้าใหม่
+// รีเซ็ตตัวนับนั้น คนที่คลิกไปมาทุก ๆ 9 นาทีจึงไม่เคยต่ออายุเลยสักครั้ง แล้วหลุดคามือ
+// ที่นาทีที่ 15 · หนึ่งในสามของหน้าต่างเหลือที่ให้ลองใหม่อีกหลายรอบก่อนจะเสียอะไรไป
+const SOS_RENEW_UNDER_MS = 5 * 60 * 1000;
+
+// อ่านเส้นตายไม่ได้เลย (storage ปิด / ยังไม่เคย probe สำเร็จ) ค่อยตกมาใช้ cadence คงที่
+// และต้องสั้นกว่าหน้าต่างจริงชัดเจน เพราะตอนที่มองไม่เห็นคือตอนที่ไม่มีโอกาสแก้ตัว
+const SOS_BLIND_GAP_MS = 5 * 60 * 1000;
+
+// เว้นระยะระหว่าง "การลอง" แต่ละครั้ง — รอบตรวจเดินทุก 15 วิ ถ้าไม่มีพื้นตรงนี้ SchoolOS
+// ที่กำลังสะดุดจะโดนยิงซ้ำทุก 15 วิตลอดเวลาที่มันยังตอบไม่ได้
+const SOS_RETRY_GAP_MS = 60 * 1000;
 
 // เริ่มขอต่ออายุ token ของเราเองเมื่อเหลืออายุน้อยกว่านี้
 // เผื่อเวลาไว้เยอะกว่ารอบตรวจมาก ๆ เพราะเน็ตอาจสะดุดแล้วต้องมีโอกาสลองใหม่หลายรอบ
@@ -117,6 +130,13 @@ export function AuthProvider({ children }) {
   const [leaving, setLeaving] = useState(false);
   const renewing = useRef(false); // กันขอต่ออายุซ้อนกันตอน interval มาชนกับ request ที่ยังค้าง
   const askingPlatform = useRef(false); // กันถาม SchoolOS ซ้อนกันตอนนาฬิกา idle หมดแล้ว
+  const sosRenewing = useRef(false); // กันต่ออายุฝั่งแพลตฟอร์มซ้อนกัน
+  // ครั้งล่าสุดที่ "ลอง" ต่ออายุฝั่งแพลตฟอร์ม (คุมความถี่) กับครั้งล่าสุดที่ "สำเร็จ" (พื้นของ
+  // ทางที่มองไม่เห็นเส้นตาย) — คนละหน้าที่กัน ครั้งที่ล้มเหลวต้องไม่กินโควตาของทั้งช่วงไป
+  const sosTried = useRef(0);
+  // จงใจเริ่มที่ 0 ไม่ใช่ Date.now(): หน้าที่เพิ่งโหลดไม่รู้อะไรเลยเกี่ยวกับนาฬิกาของแพลตฟอร์ม
+  // การเริ่มที่ "ตอนนี้" คือการเดาว่า "ต้องเหลือเต็มหน้าต่างแน่ ๆ" ซึ่งคือต้นเหตุของบั๊กนี้พอดี
+  const sosRenewed = useRef(0);
 
   // session จบระหว่างใช้งาน (หมดเวลา / token หมดอายุ / โดน 401) → ล้างของเราแล้วพากลับ
   // ไปเข้าระบบที่ SchoolOS ซึ่งเป็นประตูหน้าจริงของแพลตฟอร์ม (ดู bounceAfterSessionEnd)
@@ -248,19 +268,48 @@ export function AuthProvider({ children }) {
       }
     };
 
+    // ── ต่ออายุ session ของ SchoolOS ตามเส้นตายของมันเอง ────────────────────────
+    //
+    // เงื่อนไขบังคับยังเหมือนเดิม: ต้องมี "การขยับจริง" ในช่วงที่ผ่านมา — ถ้าดูแค่ว่าใกล้หมด
+    // แท็บที่เปิดค้างไว้เฉย ๆ จะยืด session ของทั้งแพลตฟอร์มให้คนที่ลุกจากเครื่องไปแล้ว
+    // ที่เปลี่ยนคือ "เมื่อไร": ยึดเส้นตายที่ SchoolOS บอกมาเอง ซึ่ง SessionGuard เก็บให้สดอยู่
+    // ทุกนาทีและทุกครั้งที่โหลดหน้า จึงรอดจากการ remount ที่เคยรีเซ็ตตัวนับเดิมทิ้ง
+    const renewPlatformIfWorking = async () => {
+      if (via !== 'sso') return; // ล็อกอินด้วยรหัสผ่าน = ไม่มี session แพลตฟอร์มให้ต่อ
+      if (sosRenewing.current) return;
+      if (msSinceActivity() >= RENEW_ACTIVE_WITHIN_MS) return;
+
+      const now = Date.now();
+      if (now - sosTried.current < SOS_RETRY_GAP_MS) return;
+
+      const end = platformExpiry();
+      const due =
+        end === null
+          ? now - sosRenewed.current >= SOS_BLIND_GAP_MS
+          : end - now < SOS_RENEW_UNDER_MS;
+      if (!due) return;
+
+      sosTried.current = now;
+      sosRenewing.current = true;
+      try {
+        const res = await refreshSchoolOSSession();
+        // เลื่อนพื้นเฉพาะตอนสำเร็จ · 401 = แพลตฟอร์มจบไปแล้ว ที่นี่ทำอะไรไม่ได้และไม่ใช่
+        // หน้าที่ของมันด้วย — SessionGuard เห็นข้อเท็จจริงเดียวกันภายใน 60 วิแล้วเป็นคนตัดสิน
+        if (res.ok) sosRenewed.current = now;
+      } finally {
+        sosRenewing.current = false;
+      }
+    };
+
     const timer = setInterval(() => {
-      if (check()) renewIfWorking();
+      if (!check()) return;
+      renewIfWorking();
+      renewPlatformIfWorking();
     }, CHECK_INTERVAL_MS);
 
-    // ต่ออายุ session ของ SchoolOS ตามการใช้งานจริงในระบบนี้
-    //
-    // เงื่อนไขต้องครบสองข้อ: session ยังไม่หมดอายุ (check) **และ** ผู้ใช้เพิ่งขยับจริง
-    // ภายในรอบที่ผ่านมา — ถ้าดูแค่ check() แท็บที่เปิดค้างไว้เฉย ๆ จะได้รับการต่ออายุ
-    // ไปเรื่อย ๆ จนกว่าจะโดนเตะ กลายเป็นยืด session ของทั้งแพลตฟอร์มให้คนที่ลุกจาก
-    // เครื่องไปแล้ว ซึ่งสวนทางกับเหตุผลที่ลด idle timeout ลงมาตั้งแต่แรก
-    const sosTimer = setInterval(() => {
-      if (check() && msSinceActivity() < SOS_REFRESH_INTERVAL_MS) refreshSchoolOSSession();
-    }, SOS_REFRESH_INTERVAL_MS);
+    // ยิงรอบแรกทันที ไม่ต้องรอครบรอบ — การเปิดหน้า = ผู้ใช้ขยับ และ session ที่พามาอาจ
+    // ใกล้ตายอยู่แล้ว · เงื่อนไขทุกข้อข้างบนยังบังคับอยู่ หน้าที่ไม่ได้อยู่ในอันตรายจึงไม่ทำอะไร
+    renewPlatformIfWorking();
 
     // กลับมาที่แท็บ/ปลุกเครื่องจาก sleep → ตรวจทันที ไม่ต้องรอครบรอบ
     // ต่ออายุเฉพาะตอนที่ยังไม่หมดเวลา ไม่งั้นจะไปเขียน lastActivity ทับหลัง
@@ -294,7 +343,6 @@ export function AuthProvider({ children }) {
         window.removeEventListener(evt, onActivity, { capture: true });
       }
       clearInterval(timer);
-      clearInterval(sosTimer);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('storage', onStorage);
     };

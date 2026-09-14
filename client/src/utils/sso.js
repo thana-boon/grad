@@ -102,6 +102,46 @@ async function getHandoffCode({ usersBase, audience }) {
   }
 }
 
+// ─── เส้นตายของ session ฝั่ง SchoolOS ────────────────────────────────────────
+//
+// AuthContext ต่ออายุ session แพลตฟอร์มโดยยึดค่านี้ ไม่ใช่ยึดนาฬิกาของตัวเอง และนั่นคือ
+// บั๊กทั้งก้อนที่มันถูกเขียนมาแก้: cadence คงที่ ("ทุก 10 นาที") นับจากตอน component mount
+// ซึ่งไม่มีความสัมพันธ์อะไรเลยกับนาฬิกาที่ฆ่า session จริง ๆ — มาถึงด้วย handoff ไม่ได้แปลว่า
+// เพิ่งเริ่มนับ 15 นาที (ทั้ง handoff และ GET /api/auth/session จงใจไม่เลื่อน idle window)
+// session จึงอาจเหลืออีกสองนาทีตอนหน้าเราโหลดเสร็จ แล้วการต่ออายุครั้งแรกไปตกตอนมันตายแล้ว
+// แถมทุกการโหลดหน้าใหม่รีเซ็ตตัวนับนั้น คนที่คลิกไปมาทุก ๆ 9 นาทีจึงไม่เคยต่ออายุเลยสักครั้ง
+// แล้วถูกเด้งออกคามือที่นาทีที่ 15
+//
+// เก็บใน localStorage เพราะสิ่งที่กำลังอธิบายคือ cookie ใบเดียวของทั้งเบราว์เซอร์ ค่านี้จึงต้อง
+// รอดข้ามการโหลดหน้าและเหมือนกันทุกแท็บ · มันเป็นคำตอบที่แคชไว้ ไม่ใช่ credential — ถือไว้แล้ว
+// ไม่ได้สิทธิ์อะไรเพิ่ม server ตัดสินใหม่ทุกครั้งอยู่ดี และเบราว์เซอร์ที่เก็บไม่ได้ก็แค่ตกไปใช้
+// ทางสำรองที่ถามถี่กว่า
+const PLATFORM_EXP_KEY = 'schoolosExpiresAt';
+
+/** จดเส้นตายไว้ · null = SchoolOS บอกว่าไม่มี session แล้ว ให้ลบทิ้ง */
+export function rememberPlatformExpiry(at) {
+  try {
+    if (at === null || !Number.isFinite(at)) localStorage.removeItem(PLATFORM_EXP_KEY);
+    else localStorage.setItem(PLATFORM_EXP_KEY, String(at));
+  } catch {
+    /* storage ปิดอยู่ก็ไม่เป็นไร — platformExpiry() จะคืน null แล้วตกไปใช้ทางสำรอง */
+  }
+}
+
+/**
+ * เส้นตาย หรือ null เมื่อยังไม่รู้ (เบราว์เซอร์ที่เก็บไม่ได้ / โหลดแรกหลังแพตช์นี้ขึ้น)
+ * null ต้องแปลว่า "ไปถามมา" ห้ามแปลว่า "ยังเหลือเวลาอีกเยอะ" — ผู้เรียกที่เข้าใจแบบหลัง
+ * คือผู้เรียกที่ปล่อยให้ session แพลตฟอร์มตายคามือ
+ */
+export function platformExpiry() {
+  try {
+    const at = Number(localStorage.getItem(PLATFORM_EXP_KEY));
+    return Number.isFinite(at) && at > 0 ? at : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * ถาม SchoolOS สด ๆ ว่า "ตอนนี้เบราว์เซอร์นี้เป็นใคร"
  *
@@ -133,12 +173,21 @@ export async function fetchLiveSession() {
     if (!res.ok) return null;
 
     const data = await res.json();
+    const valid = Boolean(data?.valid && data.user);
+    const expiresAt = valid && typeof data?.expiresAt === 'number' ? data.expiresAt : null;
+    // จดตรงนี้ ไม่ใช่ที่ผู้เรียกแต่ละคน เพราะมันต้องไม่ขึ้นกับว่าใครจำได้ · probe ตัวนี้วิ่งทุกครั้ง
+    // ที่โหลดหน้าและทุกนาทีหลังจากนั้น (SessionGuard) จึงเป็นตัวที่ทำให้เส้นตายที่ AuthContext
+    // ใช้ต่ออายุยังตรงอยู่เสมอข้ามการโหลดหน้าและข้ามแท็บ — และคนเดียวที่อาจลืมจด ก็คือคนที่
+    // การลืมของเขาทำให้ผู้ใช้หลุด · valid:false = ลบทิ้ง เพราะไม่มี session ให้บรรยายแล้ว
+    rememberPlatformExpiry(expiresAt);
     return {
-      valid: Boolean(data?.valid && data.user),
+      valid,
       sub: data?.user?.sub ?? null,
       code: data?.user?.code ?? null,
+      expiresAt,
     };
   } catch {
+    // ถามไม่ได้ ≠ ไม่มี session · เส้นตายที่จดไว้เดิมยังเป็นข้อมูลที่ดีที่สุดที่มี ห้ามลบ
     return null;
   }
 }
@@ -199,18 +248,37 @@ export async function leaveToPortal() {
  *
  * เงียบเสมอ: 401 = ไม่มี session ให้ต่อ (ล็อกอินด้วยรหัสผ่านมา ไม่ได้มาทาง SSO)
  * ซึ่งเป็นเรื่องปกติ ไม่ใช่ error
+ *
+ * คำตอบพกเส้นตายใหม่มาด้วย และผู้เรียกต้องใช้มัน: การต่ออายุที่ทิ้งคำตอบไปเฉย ๆ ทำให้ครั้ง
+ * ถัดไปต้องเดาเอาว่าควรเป็นเมื่อไร · `ok` กับ `status` แยกกันด้วยเหตุผลเดียวกับที่ fetchLiveSession
+ * คืน null แทน valid:false — ครั้งที่ล้มเพราะเน็ตกระตุกต้องได้ลองใหม่ ส่วนครั้งที่ได้ 401 ต้องไม่
+ * เพราะ session ที่มันจะไปต่อนั้นจบไปแล้ว
+ *
+ * @returns {Promise<{ ok: boolean, status: number, expiresAt: number | null }>} status 0 = ยิงไม่ถึงเลย
  */
 export async function refreshSchoolOSSession() {
   try {
     const config = await loadConfig();
-    if (!config?.enabled) return;
-    await fetch(usersUrl(config.usersBase, '/api/auth/refresh'), {
+    if (!config?.enabled) return { ok: false, status: 0, expiresAt: null };
+    const res = await fetch(usersUrl(config.usersBase, '/api/auth/refresh'), {
       method: 'POST',
       credentials: 'include',
+      headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
+    if (!res.ok) {
+      // 401 คือแพลตฟอร์มบอกว่า session จบไปแล้ว — ทิ้งเส้นตายที่จดไว้ จะได้ไม่มีอะไรนับถอยหลัง
+      // ไปหาเวลาที่ผ่านไปแล้ว · คนที่ลงมือกับข้อเท็จจริงนี้คือ SessionGuard ไม่ใช่ที่นี่
+      if (res.status === 401) rememberPlatformExpiry(null);
+      return { ok: false, status: res.status, expiresAt: null };
+    }
+    const data = await res.json().catch(() => ({}));
+    const expiresAt = typeof data?.expiresAt === 'number' ? data.expiresAt : null;
+    rememberPlatformExpiry(expiresAt);
+    return { ok: true, status: res.status, expiresAt };
   } catch {
-    /* ต่อไม่ได้ก็ปล่อย — ผลอย่างมากคือต้องล็อกอิน SchoolOS ใหม่รอบหน้า */
+    /* ต่อไม่ได้ก็ปล่อย — รอบหน้าลองใหม่ตอนที่ยังมีเวลาเหลือ */
+    return { ok: false, status: 0, expiresAt: null };
   }
 }
 
