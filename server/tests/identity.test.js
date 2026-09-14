@@ -118,3 +118,69 @@ test('รายการ claim ตัวตนครบตามที่ทุ�
     assert.ok(IDENTITY_FIELDS.includes(field), `ขาด ${field} ใน IDENTITY_FIELDS`);
   }
 });
+
+// ─── นาฬิกาของแอปที่ติดตั้งบนมือถือ (กับดัก 4.19) ────────────────────────────
+//
+// พี่น้องกับ ssoSub ข้างบน แต่แพงกว่า: client กับ capAt คือตัวที่กำหนดอายุของ token
+// ใบถัดไป หล่นตัวใดตัวหนึ่งตอนต่ออายุ session ของมือถือจะถูกมินต์ใหม่เป็น 8 ชั่วโมง
+// แบบเครื่องส่วนกลาง — ตัวที่มีไว้ยืดอายุให้เขา กลายเป็นตัวที่เตะเขาออกเอง และเพิ่งจะ
+// เริ่มทำอย่างนั้นหลังทำงานถูกต้องมาพักหนึ่งแล้ว
+
+test('แอปที่ติดตั้งยังเป็นแอปที่ติดตั้งหลังต่ออายุ', () => {
+  const capAt = Date.now() + 14 * 24 * 3600 * 1000;
+  const first = signToken({
+    id: 7, name: 'ครูทดสอบ', role: 'teacher', source: 'schoolos',
+    via: VIA.SSO, ssoSub: 'T00116', client: 'pwa', capAt,
+  });
+
+  const claims = decode(first);
+  assert.strictEqual(claims.client, 'pwa');
+  assert.strictEqual(claims.capAt, capAt);
+
+  const renewed = decode(renew(first));
+  assert.strictEqual(renewed.client, 'pwa', 'session ของ pwa ที่ต่ออายุแล้วต้องไม่กลายเป็น web');
+  assert.strictEqual(renewed.capAt, capAt, 'เพดานของแพลตฟอร์มต้องไม่หายไปตอนต่ออายุ');
+  assert.strictEqual(renewed.ssoSub, 'T00116');
+  assert.ok(
+    renewed.exp - renewed.iat > 24 * 3600,
+    'อายุใบใหม่ต้องยังเป็นวัน ไม่ใช่ 8 ชั่วโมงของเครื่องส่วนกลาง',
+  );
+});
+
+test('อายุ token ถูกตัดด้วยเพดานของแพลตฟอร์ม ทั้งตอนออกใบแรกและตอนต่ออายุ', () => {
+  const capAt = Date.now() + 2 * 3600 * 1000; // เหลืออีก 2 ชั่วโมง
+  const token = signToken({
+    id: 7, name: 'ครูทดสอบ', role: 'teacher', source: 'schoolos',
+    via: VIA.SSO, ssoSub: 'T00116', client: 'pwa', capAt,
+  });
+  const claims = decode(token);
+  assert.ok(claims.exp - claims.iat <= 2 * 3600 + 5, 'ใบแรกต้องไม่ยาวเกินเพดาน');
+
+  // เดิมเพดานถูกส่งเป็น expiresIn ตอนล็อกอินใบเดียว แล้วหายไปตั้งแต่การต่ออายุครั้งแรก
+  // ใบที่สองจึงกลับไปเป็น 8 ชั่วโมงเต็มเสมอ ไม่ว่า session ต้นทางจะเหลือเท่าไร
+  const renewed = decode(renew(token));
+  assert.ok(renewed.exp - renewed.iat <= 2 * 3600 + 5, 'ใบที่ต่ออายุก็ต้องไม่ยาวเกินเพดานเดิม');
+});
+
+test('ไม่มีเพดาน กับ ไม่ได้ตอบ ไม่ใช่เรื่องเดียวกัน', () => {
+  // null = แพลตฟอร์มบอกว่า "ไม่มีเพดาน" — ต้องรอดไปถึง token และรอดข้ามการต่ออายุ
+  const uncapped = signToken({
+    id: 7, name: 'ครูทดสอบ', role: 'teacher', source: 'schoolos',
+    via: VIA.SSO, ssoSub: 'T00116', client: 'pwa', capAt: null,
+  });
+  assert.strictEqual(decode(uncapped).capAt, null, 'null ต้องไม่ถูกตัวกรอง claim ทิ้ง');
+  assert.strictEqual(decode(renew(uncapped)).capAt, null, 'null ต้องรอดข้ามการต่ออายุ');
+
+  // undefined = ไม่ได้ตอบ — ต้องไม่กลายเป็น null (ซึ่งจะอ่านว่า "ไม่มีเพดาน")
+  const silent = signToken({
+    id: 7, name: 'ครูทดสอบ', role: 'teacher', source: 'schoolos', via: VIA.SSO, ssoSub: 'T00116',
+  });
+  assert.ok(!('capAt' in decode(silent)), 'ไม่มีค่า ต้องยังคงไม่มีค่า');
+});
+
+test('claim ที่หายไปถูกอ่านเป็นเครื่องส่วนกลาง ไม่ใช่เป็นแอปที่ติดตั้ง', () => {
+  const token = signToken({ id: 7, name: 'ครู', role: 'teacher', source: 'schoolos' });
+  const claims = decode(token);
+  assert.ok(!('client' in claims), 'ไม่มี client claim');
+  assert.ok(claims.exp - claims.iat <= 8 * 3600 + 5, 'ต้องได้หน้าต่างสั้น ไม่ใช่ยาว');
+});

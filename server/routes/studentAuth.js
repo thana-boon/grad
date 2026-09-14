@@ -281,7 +281,7 @@ async function checkStudentAccess({ code, active = null, status = null, found = 
  */
 async function buildStudentSession(
   student,
-  { username, via = VIA.PASSWORD, audit, ssoSub = null, expiresIn } = {}
+  { username, via = VIA.PASSWORD, audit, ssoSub = null, expiresIn, client, capAt } = {}
 ) {
   const code = student.student_code;
 
@@ -296,8 +296,11 @@ async function buildStudentSession(
     [code]
   );
 
+  // client/capAt ไปกับตัวตน ไม่ใช่กับ option: signToken() คำนวณอายุจากสองค่านี้เอง
+  // และมันต้องอยู่ใน claim ด้วย ไม่งั้น /auth/refresh ซึ่งออกใบใหม่จาก claim ของใบเก่า
+  // จะไม่มีทางรู้เลยว่าใบนี้เป็นของแอปที่ติดตั้ง แล้วมินต์ใบต่อไปเป็น 8 ชั่วโมงตามเดิม
   const token = signToken(
-    { student_code: code, username: username || code, role: 'student', via, ssoSub },
+    { student_code: code, username: username || code, role: 'student', via, ssoSub, client, capAt },
     { expiresIn }
   );
 

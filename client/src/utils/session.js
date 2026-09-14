@@ -28,6 +28,29 @@ import { withBase } from './withBase';
 export const IDLE_TIMEOUT_MINUTES = 15;
 export const IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MINUTES * 60 * 1000;
 
+// ─── หน้าต่าง idle ของแอปที่ติดตั้งบนมือถือ ──────────────────────────────────
+//
+// 15 นาทีข้างบนเป็นคำตอบของ "เครื่องในห้องพักครูที่มีคนเดินผ่านตลอด" ซึ่งเป็นคำตอบที่ผิด
+// สนิทสำหรับมือถือของเจ้าตัว: เครื่องมีล็อกหน้าจอของตัวเองอยู่แล้ว ไม่มีคนถัดไป และแอป
+// ถูกเปิด-ปิดวันละสามสิบครั้ง · 15 นาทีที่นั่นไม่ใช่ความปลอดภัย มันคือการถามรหัสผ่าน
+// ทุกครั้งที่ปลุกจอ ซึ่งจบลงด้วยการที่ไม่มีใครติดตั้งแอปไว้
+//
+// ตัวที่บังคับจริงยังเป็นอายุ token ที่ server ตรวจเสมอ — ค่านี้แค่ต้องไม่ขัดกับมัน
+export const PWA_IDLE_DAYS = 30;
+export const PWA_IDLE_TIMEOUT_MS = PWA_IDLE_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * หน้าต่าง idle ของ session ใบนี้ — คนละคำตอบสำหรับ client คนละชนิด
+ *
+ * ⚠️ ค่า client มาจาก claim ในโทเคน ซึ่งคัดลอกมาจาก SchoolOS ตอน redeem handoff
+ * ห้ามเดาเองจาก matchMedia('(display-mode: standalone)') หรือ User-Agent: เปิดแอปที่
+ * ติดตั้งไว้แต่เคยล็อกอินมาจากเบราว์เซอร์ = แพลตฟอร์มถือว่า web แต่เราถือว่า pwa แล้วเรา
+ * ก็ยืด session ให้ตัวเองยาวกว่าที่แพลตฟอร์มตั้งใจ = ช่องโหว่ที่เราสร้างขึ้นเอง
+ */
+export function idleTimeoutMs(client) {
+  return client === 'pwa' ? PWA_IDLE_TIMEOUT_MS : IDLE_TIMEOUT_MS;
+}
+
 // เขียน lastActivity ถี่สุดทุก ๆ เท่านี้ — กัน mousemove ยิง localStorage รัวๆ
 const ACTIVITY_WRITE_INTERVAL_MS = 30 * 1000;
 
@@ -180,13 +203,14 @@ export function msSinceActivity() {
  * ตั้งใจให้ผิดไปทางเตะออก ไม่ใช่ทางยืดให้ ตัว probe ที่พังจึงกลายเป็น session
  * อมตะไม่ได้
  */
-export function isIdleExpired() {
+export function isIdleExpired(client) {
+  const limit = idleTimeoutMs(client);
   const last = Number(localStorage.getItem(LAST_ACTIVITY_KEY));
   // ยังไม่เคยบันทึก = เพิ่งอัปเดตมาจากเวอร์ชันก่อนหน้าที่ยังไม่มีฟีเจอร์นี้
   // → ปล่อยให้อายุ token เป็นตัวตัดสินแทน ไม่เตะออกทันทีโดยไม่มีเหตุ
   if (!Number.isFinite(last) || last <= 0) return false;
-  if (Date.now() - last < IDLE_TIMEOUT_MS) return false;
-  return msSincePlatformActivity() >= IDLE_TIMEOUT_MS;
+  if (Date.now() - last < limit) return false;
+  return msSincePlatformActivity() >= limit;
 }
 
 // ─── อ่านวันหมดอายุจาก JWT ───────────────────────────────────────────────────
@@ -366,7 +390,23 @@ export function bouncedToSchoolOSRecently() {
  * การ navigate ฝั่ง client จะ re-render จาก cache ก้อนเดิม ซึ่งบนเครื่องส่วนกลาง
  * แปลว่าคนถัดไปอาจเห็นข้อมูลของคนก่อนหน้าค้างอยู่
  */
-export function leaveAfterSessionEnd(reason) {
+export function leaveAfterSessionEnd(reason, { client } = {}) {
+  /**
+   * แอปที่ติดตั้งไม่ได้จบที่เดียวกับแท็บบนเครื่องส่วนกลาง
+   *
+   * บนเครื่องส่วนกลาง การหลุดคือความตั้งใจ และการล็อกอินใหม่เป็นสิ่งที่ทำได้ที่ SchoolOS
+   * เท่านั้น จึงส่งไปที่นั่น · บนมือถือของเจ้าตัวมันคนละเรื่อง: session ฝั่งแพลตฟอร์มของเขา
+   * วัดกันเป็นสัปดาห์และแทบแน่นอนว่ายังไม่ตาย สิ่งที่หมดคือ token ของเราเท่านั้น การส่งเขา
+   * ไป portal จึงเป็นทางตัน — คนที่ล็อกอินอยู่แล้วถูกโชว์หน้าล็อกอิน แล้วต้องหาทางกลับมา
+   * แอปนี้เอง (กับดัก 4.21) · ให้จบที่ /login ของเราแล้วปล่อย silent SSO พากลับเข้าไปเงียบ ๆ
+   */
+  if (client === 'pwa') {
+    const target = withBase('/login');
+    if (window.location.pathname === target) window.location.reload();
+    else window.location.assign(target);
+    return;
+  }
+
   if (!STAY_ON_LOGIN_REASONS.includes(reason)) {
     leaveToSchoolOS();
     return;
@@ -380,9 +420,9 @@ export function leaveAfterSessionEnd(reason) {
 }
 
 /** จบ session (ล้างของเราทิ้ง) แล้วพาออกไป */
-export function bounceAfterSessionEnd(reason) {
+export function bounceAfterSessionEnd(reason, { client } = {}) {
   clearStoredSession(reason);
-  leaveAfterSessionEnd(reason);
+  leaveAfterSessionEnd(reason, { client });
 }
 
 // ─── สะพานระหว่าง axios interceptor กับ AuthContext ──────────────────────────

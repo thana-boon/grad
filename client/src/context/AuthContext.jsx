@@ -89,9 +89,11 @@ function loadSession() {
     return { user: null, token: null };
   }
 
+  // หน้าต่าง idle ยาวไม่เท่ากันตาม client ที่แพลตฟอร์มจัดให้ session ใบนี้ — แอปที่ติดตั้ง
+  // บนมือถือถูกเปิด-ปิดทั้งวัน 15 นาทีที่นั่นคือการถามรหัสผ่านทุกครั้งที่ปลุกจอ
   const reason = isTokenExpired(token)
     ? LOGOUT_REASONS.EXPIRED
-    : isIdleExpired()
+    : isIdleExpired(getTokenClaims(token).client)
       ? LOGOUT_REASONS.IDLE
       : null;
 
@@ -143,9 +145,11 @@ export function AuthProvider({ children }) {
   //
   // ต่างจากปุ่ม "ออกจากระบบ" ตรงที่ไม่ได้เตะออกจาก SchoolOS ด้วย — ครูอาจกำลังทำงาน
   // ในระบบอื่นของแพลตฟอร์มอยู่ พอไปถึงก็จะเห็นว่ายังล็อกอินอยู่แล้วเดินกลับเข้ามาได้เลย
-  const clearSession = useCallback((reason, { redirect = true } = {}) => {
+  const clearSession = useCallback((reason, { redirect = true, client } = {}) => {
     // bounceAfterSessionEnd ล้าง storage ให้ในตัวแล้วโหลดหน้าใหม่ทั้งหน้า
-    if (redirect) bounceAfterSessionEnd(reason);
+    // client ตัดสินปลายทาง: เครื่องส่วนกลางไป SchoolOS · แอปที่ติดตั้งไป /login ของเรา
+    // แล้วให้ silent SSO พากลับเข้าหน้าเดิม (ดู leaveAfterSessionEnd)
+    if (redirect) bounceAfterSessionEnd(reason, { client });
     else clearStoredSession(reason);
     setSession({ user: null, token: null });
   }, []);
@@ -207,11 +211,11 @@ export function AuthProvider({ children }) {
     // ยืนยันสำเร็จแล้วเข็มฝั่งแพลตฟอร์มเดินหน้าไปอีก 1 ช่วง idle จึงถามอย่างมากครั้งเดียว
     // ต่อหนึ่งช่วง ไม่ใช่ทุก 15 วิ (และถ้า session ฝั่ง SchoolOS ตายก่อนหน้านั้น
     // SessionGuard จะเป็นคนเตะเองภายใน 60 วิอยู่แล้ว)
-    const { via, ssoSub } = getTokenClaims(token);
+    const { via, ssoSub, client } = getTokenClaims(token);
 
     const decideIdle = async () => {
       if (via !== 'sso' || !ssoSub) {
-        clearSession(LOGOUT_REASONS.IDLE);
+        clearSession(LOGOUT_REASONS.IDLE, { client });
         return;
       }
       if (askingPlatform.current) return;
@@ -222,7 +226,7 @@ export function AuthProvider({ children }) {
           markPlatformActivity();
           return;
         }
-        clearSession(LOGOUT_REASONS.IDLE);
+        clearSession(LOGOUT_REASONS.IDLE, { client });
       } finally {
         askingPlatform.current = false;
       }
@@ -233,10 +237,10 @@ export function AuthProvider({ children }) {
     // เพื่อไม่ให้รอบนี้ไปต่ออายุอะไรก่อนรู้ผล
     const check = () => {
       if (isTokenExpired(token)) {
-        clearSession(LOGOUT_REASONS.EXPIRED);
+        clearSession(LOGOUT_REASONS.EXPIRED, { client });
         return false;
       }
-      if (isIdleExpired()) {
+      if (isIdleExpired(client)) {
         decideIdle();
         return false;
       }
@@ -333,7 +337,7 @@ export function AuthProvider({ children }) {
     const onStorage = (e) => {
       if (e.key === TOKEN_KEY && !e.newValue) {
         setSession({ user: null, token: null });
-        leaveAfterSessionEnd(getLogoutReason());
+        leaveAfterSessionEnd(getLogoutReason(), { client });
       }
     };
     window.addEventListener('storage', onStorage);

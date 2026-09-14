@@ -50,11 +50,13 @@ async function loadStaffProfile(sosUser, teacher) {
  * @param expiresIn อายุ token ที่อยากจำกัด (วินาที) — ไม่ส่ง = ใช้ JWT_EXPIRES_IN
  * @param via      ทางที่เข้ามา (ดู VIA ใน config/identity.js)
  * @param ssoSub   sub ของ session SchoolOS ที่รับช่วงมา — มีเฉพาะทาง silent SSO
+ * @param client  'web' | 'pwa' จาก SchoolOS — ชุดหน้าต่างเวลาของ session นี้ (คัดลอก ห้ามเดา)
+ * @param capAt   เพดานสัมบูรณ์ของ session ฝั่งแพลตฟอร์ม (epoch ms) ส่งดิบ ๆ · null = ไม่มีเพดาน
  * @returns { token, user, access } · หรือ { denied: { status, reason, message } } เมื่อไม่ให้เข้า
  */
 async function issueStaffSession(
   sosUser,
-  { teacher = null, expiresIn, via = VIA.PASSWORD, ssoSub = null } = {}
+  { teacher = null, expiresIn, via = VIA.PASSWORD, ssoSub = null, client, capAt } = {}
 ) {
   // SchoolOS ตอบ valid:true ให้ครูที่ลาออกแล้วด้วย (พร้อม active:false)
   // ระบบผู้เรียกต้องตรวจเอง — GradTrack ไม่ให้เข้า
@@ -92,6 +94,11 @@ async function issueStaffSession(
       source: 'schoolos',
       via,
       ssoSub,
+      // client/capAt ไปกับตัวตน ไม่ใช่กับ option: signToken() คำนวณอายุจากสองค่านี้เอง
+      // และมันต้องอยู่ใน claim ด้วย ไม่งั้น /auth/refresh ซึ่งออกใบใหม่จาก claim ของใบเก่า
+      // จะไม่รู้เลยว่าใบนี้เป็นของแอปที่ติดตั้ง แล้วมินต์ใบต่อไปเป็น 8 ชั่วโมงตามเดิม
+      client,
+      capAt,
     },
     { expiresIn }
   );

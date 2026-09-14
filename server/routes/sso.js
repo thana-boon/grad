@@ -45,15 +45,6 @@ const PORTAL_URL = (process.env.SCHOOLOS_PORTAL_URL || '/').trim();
 
 const ENABLED = process.env.SSO_SILENT_LOGIN !== '0';
 
-/**
- * อายุ token ของเราต้องไม่ยาวเกิน session ของ SchoolOS
- * ไม่งั้นผู้ใช้จะ "ยังอยู่ใน GradTrack" ทั้งที่ต้นทางหมดอายุไปแล้ว
- * คืนวินาที หรือ undefined = ใช้ JWT_EXPIRES_IN ตามปกติ
- */
-function cappedExpiry(absoluteEndsAt) {
-  const seconds = Math.floor((Number(absoluteEndsAt) - Date.now()) / 1000);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
-}
 
 // ─── GET /api/auth/sso/config ────────────────────────────────────────────────
 // ค่าที่หน้า login ต้องรู้ก่อนไปขอโค้ดจาก SchoolOS — ตั้งที่ .env ฝั่ง server
@@ -71,9 +62,26 @@ router.post('/', ssoLimiter, async (req, res) => {
   if (!code) return res.status(400).json({ message: 'ไม่พบโค้ดสำหรับเข้าสู่ระบบ' });
 
   try {
-    const { user: session, absoluteEndsAt } = await schoolos.redeemHandoff(code);
-    const expiresIn = cappedExpiry(absoluteEndsAt);
+    const { user: session, absoluteEndsAt, client } = await schoolos.redeemHandoff(code);
     const identity = String(session.code || session.sub || '').trim();
+
+    /**
+     * ─── นาฬิกาของ session นี้ มาจาก SchoolOS ทั้งคู่ ─────────────────────────
+     *
+     * `client` บอกว่าแพลตฟอร์มจัด session นี้ไว้ในชุดหน้าต่างไหน: แท็บบนเครื่องส่วนกลาง
+     * (สั้น) หรือแอปที่ติดตั้งบนมือถือของเจ้าตัว (ยาว) · คัดลอกอย่างเดียว ห้ามเดาจาก
+     * User-Agent ฝั่งเรา ไม่งั้นสองระบบจะถือความเห็นคนละอย่างเรื่อง session เดียวกัน
+     *
+     * `capAt` คือเพดานสัมบูรณ์ของฝั่งแพลตฟอร์ม ส่งต่อดิบ ๆ — `null` แปลว่า "ไม่มีเพดาน"
+     * ซึ่งเป็นค่าปกติของแอปที่ติดตั้ง คนละเรื่องกับ undefined ที่แปลว่า "ไม่ได้ตอบ"
+     * เขียน `?? null` หรือ `|| 0` ทับตรงนี้เมื่อไหร่ ความเงียบจะกลายเป็น session อมตะ
+     *
+     * เดิมตรงนี้แปลงเพดานเป็น `expiresIn` แล้วส่งเข้าไปตอนออก token ใบแรกใบเดียว
+     * ค่านั้นจึงหายไปตั้งแต่การต่ออายุครั้งแรก (/auth/refresh ออกใบใหม่จาก claim ของใบเก่า
+     * และไม่มีทางรู้ค่าที่ route นี้เคยส่ง) · ตอนนี้ทั้งสองค่าเป็น claim ในโทเคน แล้ว
+     * signToken() คำนวณอายุจากมันทุกครั้ง รวมถึงตอนต่ออายุ
+     */
+    const capAt = absoluteEndsAt; // ดิบ ๆ: number | null | undefined ต่างกันทั้งสามอย่าง
 
     // ─── ผูก session ของเราเข้ากับ session ของ SchoolOS ───────────────────────
     // เก็บ sub ที่ SchoolOS ให้มา **ดิบ ๆ ไม่แปลง** เพราะหน้าเว็บต้องเอาไปเทียบกับ
@@ -109,7 +117,8 @@ router.post('/', ssoLimiter, async (req, res) => {
         via: VIA.SSO,
         audit,
         ssoSub,
-        expiresIn,
+        client,
+        capAt,
       });
 
       logger.info('SSO login success (student)', {
@@ -144,9 +153,10 @@ router.post('/', ssoLimiter, async (req, res) => {
 
     const { denied, access, token, user } = await issueStaffSession(sosUser, {
       teacher,
-      expiresIn,
       via: VIA.SSO,
       ssoSub,
+      client,
+      capAt,
     });
     if (denied) {
       logger.warn(`SSO blocked (teacher): ${denied.reason}`, {

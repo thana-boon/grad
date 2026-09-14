@@ -31,15 +31,35 @@ const FIELDS = [
   // ไม่แปลง เพราะต้องเอาไปเทียบกับค่าที่ GET /api/auth/session ของ SchoolOS ตอบมา
   // ตรง ๆ — id ในฐานข้อมูลเราเองเทียบอะไรกับฝั่งโน้นไม่ได้เลย
   'ssoSub',
+  // ─── นาฬิกาของ session ใบนี้ (มาจาก SchoolOS ตอน redeem handoff) ────────────
+  // 'web' | 'pwa' — ชุดหน้าต่างเวลาที่แพลตฟอร์มจัดให้ session นี้
+  //   web = แท็บบนเครื่องส่วนกลาง (สั้น) · pwa = แอปที่ติดตั้งบนมือถือของเจ้าตัว (ยาว)
+  // ⚠️ คัดลอกอย่างเดียว ห้ามเดาจาก User-Agent หรือ display-mode ฝั่งเรา ไม่งั้นสองระบบ
+  //    จะถือความเห็นคนละอย่างเรื่อง session เดียวกัน · ไม่มีค่า = อ่านเป็น web (สั้นกว่า)
+  'client',
+  // เพดานสัมบูรณ์ของ session ฝั่งแพลตฟอร์ม (epoch ms) — คัดลอกดิบ ๆ ไม่คำนวณเอง
+  // ⚠️ null กับ undefined ความหมายตรงข้ามกัน (ดู NULLABLE ข้างล่าง)
+  'capAt',
 ];
+
+// claim ที่ `null` เป็น "คำตอบ" ไม่ใช่ "ไม่มีค่า" จึงต้องรอดข้ามการต่ออายุไปทั้งอย่างนั้น
+//
+// capAt: null = แพลตฟอร์มบอกว่า session นี้ไม่มีเพดานเลย (ค่าปกติของแอปที่ติดตั้ง)
+// capAt: undefined = โทเคนรุ่นเก่าที่ไม่เคยมีฟิลด์นี้ → ตกไปใช้ JWT_EXPIRES_IN ตามเดิม
+// ตัวกรองด้านล่างเคยทิ้ง null ทุกตัว ซึ่งจะยุบสองความหมายนี้เป็นอันเดียว แล้วมือถือที่
+// ควรอยู่ได้เป็นเดือนก็หดเหลือ 8 ชั่วโมงตั้งแต่การต่ออายุครั้งแรก
+const NULLABLE = new Set(['capAt']);
 
 /** คัดเฉพาะ claim ที่เป็นตัวตน (ทิ้ง iat/exp ของใบเก่าไปในตัว) */
 function identityOf(claims = {}) {
   const identity = {};
   for (const field of FIELDS) {
-    if (claims[field] !== undefined && claims[field] !== null) identity[field] = claims[field];
+    const value = claims[field];
+    if (value === undefined) continue;
+    if (value === null && !NULLABLE.has(field)) continue;
+    identity[field] = value;
   }
   return identity;
 }
 
-module.exports = { identityOf, IDENTITY_FIELDS: FIELDS, VIA };
+module.exports = { identityOf, IDENTITY_FIELDS: FIELDS, NULLABLE_FIELDS: NULLABLE, VIA };
